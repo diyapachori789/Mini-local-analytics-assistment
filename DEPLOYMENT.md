@@ -203,7 +203,30 @@ every stored query along with them. `down` without `-v` is safe.
 
 ---
 
-## 8. Troubleshooting
+## 8. Validating the workflow before you push
+
+A workflow file with a bad expression does not fail a job — it fails to load at
+all, so nothing runs and you find out only after pushing. Check it locally in
+one command:
+
+```bash
+docker run --rm -v "${PWD}:/repo" -w /repo rhysd/actionlint:latest
+```
+
+On PowerShell the `${PWD}` form works as written. Exit code 0 means clean. The
+image also bundles shellcheck, so it lints the bash inside every `run:` block
+and `scripts/deploy.sh` at the same time.
+
+This is worth knowing because GitHub evaluates some fields before the `secrets`
+context exists — `environment.url`, `if`, `runs-on`, `name`, `concurrency` and
+`timeout-minutes` among them. A `${{ secrets.X }}` in any of those is rejected
+with `Unrecognized named-value: 'secrets'`, which reads like a typo but is a
+scoping rule. Use `vars.X` (a repository *variable*) in those positions, or move
+the value into `env:` at step level as this workflow does.
+
+---
+
+## 9. Troubleshooting
 
 | Symptom | Cause |
 |---|---|

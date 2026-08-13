@@ -137,9 +137,11 @@ jobs:
     timeout-minutes: 15
     # Optional: create an Environment named `production` in repo settings to
     # require a manual approval before this job runs.
-    environment:
-      name: production
-      url: http://${{ secrets.EC2_HOST }}:8000
+    #
+    # No `url:` here on purpose. GitHub resolves the environment before the
+    # secrets context exists, so `${{ secrets.EC2_HOST }}` is not a valid value
+    # for it. The deployed address is written to the run summary instead.
+    environment: production
     steps:
       - uses: actions/checkout@v4
 
@@ -208,6 +210,19 @@ jobs:
           printf '%s\n' "$REGISTRY_TOKEN" | ssh -i ~/.ssh/deploy.pem \
             "$EC2_USER@$EC2_HOST" \
             "REGISTRY_USER='$REGISTRY_USER' bash ~/mini-local-analytics/deploy.sh"
+
+      - name: Summarise the deployment
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          APP_IMAGE: ${{ needs.build.outputs.image }}
+        run: |
+          {
+            echo "### Deployed"
+            echo ""
+            echo "- URL: http://${EC2_HOST}:8000"
+            echo "- Image: \`${APP_IMAGE}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove the key from the runner
         if: always()
