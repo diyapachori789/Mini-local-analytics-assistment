@@ -1,0 +1,301 @@
+opportunity_id,account_name,region,industry,owner,lead_source,stage,amount,created_date,close_date,is_closed,is_won,notes
+OPP-1000,Zenith Group,EMEA,Retail,D. Patel,Web,Closed Won,10914,2024-12-09,2025-12-04,True,True,"Champion left the company, deal stalled."
+OPP-1001,Zenith Industries,LATAM,Healthcare,D. Patel,Outbound,Prospecting,5298,2024-09-20,2025-12-21,False,False,"Renewal likely, happy with support."
+OPP-1002,Cobalt Group,APAC,Technology,A. Rao,Partner,Closed Lost,39393,2024-03-23,2026-03-07,True,False,Competitor Nimbus offered lower price.
+OPP-1003,Summit Industries,EMEA,Retail,C. Mehta,Outbound,Proposal,248177,2025-10-09,2026-09-04,False,False,Waiting on legal review of MSA.
+OPP-1004,Vertex Industries,EMEA,Manufacturing,C. Mehta,Partner,Closed Won,118933,2026-02-02,2026-02-28,True,True,Waiting on legal review of MSA.
+OPP-1005,Vertex Corp,NA,Healthcare,D. Patel,Partner,Qualification,25874,2025-04-22,2025-10-21,False,False,"Renewal likely, happy with support."
+OPP-1006,Acme Systems,APAC,Manufacturing,C. Mehta,Web,Closed Lost,12804,2026-12-18,2026-01-08,True,False,Lost on missing SOC2 compliance.
+OPP-1007,Nova Industries,NA,Finance,B. Singh,Referral,Closed Lost,12684,2026-12-11,2026-07-21,True,False,"Renewal likely, happy with support."
+OPP-1008,Meridian Corp,EMEA,Technology,B. Singh,Referral,Closed Won,23898,2025-10-13,2025-09-16,True,True,Price too high vs competitor Vega.
+OPP-1009,Acme Corp,EMEA,Retail,C. Mehta,Event,Closed Won,40167,2025-07-20,2026-09-28,True,True,Competitor Nimbus offered lower price.
+OPP-1010,Vertex Labs,EMEA,Finance,E. Shah,Outbound,Qualification,121587,2024-08-01,2026-09-25,False,False,Lost on missing SOC2 compliance.
+OPP-1011,Pinnacle Labs,EMEA,Technology,C. Mehta,Event,Qualification,76762,2024-09-25,2025-10-11,False,False,Lost on missing SOC2 compliance.
+OPP-1012,Meridian Group,NA,Manufacturing,E. Shah,Referral,Prospecting,119990,2026-02-03,2025-09-25,False,False,"Renewal likely, happy with support."
+OPP-1013,Nova Corp,APAC,Manufacturing,E. Shah,Partner,Negotiation,76093,2026-07-07,2025-12-10,False,False,Competitor Nimbus offered lower price.
+OPP-1014,Acme Corp,EMEA,Technology,B. Singh,Web,Qualification,75268,2024-06-01,2025-10-08,False,False,"Champion left the company, deal stalled."
+OPP-1015,Meridian Group,LATAM,Healthcare,D. Patel,Partner,Closed Lost,25740,2024-09-08,2026-04-18,True,False,Lost on missing SOC2 compliance.
+OPP-1016,Zenith Group,EMEA,Technology,D. Patel,Event,Prospecting,39683,2026-07-12,2026-12-02,False,False,Competitor Nimbus offered lower price.
+OPP-1017,Orion Corp,EMEA,Manufacturing,E. Shah,Web,Qualification,11728,2024-09-15,2025-05-15,False,False,"Champion left the company, deal stalled."
+OPP-1018,Pinnacle Labs,LATAM,Healthcare,D. Patel,Web,Closed Won,251476,2026-01-03,2025-03-14,True,True,"Budget approved, moving to procurement."
+OPP-1019,Cobalt Labs,LATAM,Healthcare,B. Singh,Event,Proposal,249863,2025-05-26,2026-07-23,False,False,Lost on missing SOC2 compliance.
+OPP-1020,Atlas Systems,LATAM,Retail,E. Shah,Referral,Closed Lost,6063,2026-12-18,2026-01-02,True,False,"Champion left the company, deal stalled."
+OPP-1021,Atlas Labs,NA,Retail,E. Shah,Web,Closed Lost,73278,2024-03-03,2025-07-04,True,False,Competitor Nimbus offered lower price.
+OPP-1022,Cobalt Corp,APAC,Healthcare,C. Mehta,Partner,Proposal,26828,2026-10-17,2026-04-22,False,False,"Budget approved, moving to procurement."
+OPP-1023,Atlas Industries,EMEA,Technology,E. Shah,Referral,Closed Won,251832,2025-08-11,2025-01-15,True,True,"Renewal likely, happy with support."
+OPP-1024,Pinnacle Industries,APAC,Retail,E. Shah,Web,Prospecting,24167,2025-02-08,2025-08-27,False,False,"Renewal likely, happy with support."
+OPP-1025,Meridian Industries,APAC,Finance,E. Shah,Referral,Closed Lost,6644,2024-03-09,2025-12-18,True,False,Waiting on legal review of MSA.
+OPP-1026,Nova Systems,APAC,Technology,A. Rao,Event,Qualification,39028,2026-05-17,2025-02-21,False,False,"Budget approved, moving to procurement."
+OPP-1027,Meridian Systems,EMEA,Healthcare,E. Shah,Web,Closed Won,40259,2025-03-24,2026-09-01,True,True,Waiting on legal review of MSA.
+OPP-1028,Vertex Group,NA,Technology,C. Mehta,Outbound,Closed Won,4262,2024-07-05,2026-01-12,True,True,Price too high vs competitor Vega.
+OPP-1029,Vertex Labs,APAC,Manufacturing,B. Singh,Event,Closed Lost,248665,2026-03-08,2025-07-01,True,False,"Budget approved, moving to procurement."
+OPP-1030,Nova Industries,APAC,Finance,B. Singh,Referral,Closed Won,6516,2024-07-28,2026-04-07,True,True,"Champion left the company, deal stalled."
+OPP-1031,Pinnacle Systems,LATAM,Retail,C. Mehta,Web,Closed Won,248284,2025-06-09,2026-06-21,True,True,Competitor Nimbus offered lower price.
+OPP-1032,Summit Systems,APAC,Manufacturing,E. Shah,Outbound,Closed Lost,23156,2025-03-19,2025-10-14,True,False,Competitor Nimbus offered lower price.
+OPP-1033,Pinnacle Industries,NA,Finance,D. Patel,Web,Proposal,5903,2026-04-09,2026-01-17,False,False,Waiting on legal review of MSA.
+OPP-1034,Summit Corp,LATAM,Finance,E. Shah,Referral,Closed Won,25077,2026-02-24,2026-11-14,True,True,Lost on missing SOC2 compliance.
+OPP-1035,Acme Corp,APAC,Finance,B. Singh,Partner,Proposal,12521,2025-11-24,2026-07-18,False,False,Waiting on legal review of MSA.
+OPP-1036,Orion Group,APAC,Technology,B. Singh,Event,Negotiation,74938,2025-11-07,2025-11-03,False,False,Lost on missing SOC2 compliance.
+OPP-1037,Zenith Corp,NA,Manufacturing,D. Patel,Partner,Closed Lost,11946,2024-01-02,2025-08-14,True,False,Lost on missing SOC2 compliance.
+OPP-1038,Vertex Labs,LATAM,Technology,E. Shah,Referral,Prospecting,251154,2026-01-25,2025-07-08,False,False,Competitor Nimbus offered lower price.
+OPP-1039,Cobalt Labs,LATAM,Retail,D. Patel,Referral,Negotiation,75438,2025-11-17,2026-08-20,False,False,"Strong technical fit, exec sponsor engaged."
+OPP-1040,Orion Systems,LATAM,Technology,C. Mehta,Referral,Negotiation,251185,2024-11-09,2026-11-08,False,False,"Renewal likely, happy with support."
+OPP-1041,Cobalt Corp,NA,Technology,D. Patel,Partner,Proposal,10947,2026-02-05,2026-12-05,False,False,Waiting on legal review of MSA.
+OPP-1042,Acme Labs,LATAM,Manufacturing,A. Rao,Event,Negotiation,249720,2025-01-07,2026-10-23,False,False,"Renewal likely, happy with support."
+OPP-1043,Orion Systems,LATAM,Manufacturing,A. Rao,Partner,Closed Won,120236,2025-09-24,2025-08-08,True,True,Waiting on legal review of MSA.
+OPP-1044,Acme Labs,LATAM,Retail,E. Shah,Web,Closed Won,249914,2025-12-06,2025-10-18,True,True,Competitor Nimbus offered lower price.
+OPP-1045,Nova Industries,APAC,Finance,D. Patel,Event,Closed Won,4065,2024-08-06,2026-06-07,True,True,Price too high vs competitor Vega.
+OPP-1046,Zenith Labs,EMEA,Technology,A. Rao,Referral,Qualification,120209,2024-08-01,2025-06-08,False,False,Lost on missing SOC2 compliance.
+OPP-1047,Nova Industries,APAC,Finance,B. Singh,Outbound,Closed Lost,11939,2026-03-08,2025-10-07,True,False,Competitor Nimbus offered lower price.
+OPP-1048,Summit Industries,LATAM,Healthcare,A. Rao,Outbound,Closed Won,73105,2024-05-04,2026-10-22,True,True,Lost on missing SOC2 compliance.
+OPP-1049,Nova Systems,APAC,Technology,E. Shah,Event,Prospecting,248495,2025-11-20,2025-06-18,False,False,"Champion left the company, deal stalled."
+OPP-1050,Nova Systems,NA,Retail,C. Mehta,Outbound,Closed Lost,25603,2025-02-14,2026-12-05,True,False,"Strong technical fit, exec sponsor engaged."
+OPP-1051,Nova Group,NA,Manufacturing,E. Shah,Outbound,Negotiation,26488,2026-10-09,2025-02-09,False,False,Price too high vs competitor Vega.
+OPP-1052,Orion Systems,APAC,Retail,A. Rao,Outbound,Proposal,38868,2025-06-06,2026-05-11,False,False,Lost on missing SOC2 compliance.
+OPP-1053,Zenith Labs,LATAM,Manufacturing,A. Rao,Web,Prospecting,76105,2026-07-16,2025-12-16,False,False,"Renewal likely, happy with support."
+OPP-1054,Pinnacle Group,APAC,Manufacturing,E. Shah,Event,Qualification,120382,2026-04-10,2026-08-18,False,False,Waiting on legal review of MSA.
+OPP-1055,Cobalt Systems,NA,Healthcare,B. Singh,Partner,Closed Won,10494,2025-05-09,2025-06-04,True,True,"Renewal likely, happy with support."
+OPP-1056,Summit Group,NA,Finance,A. Rao,Outbound,Closed Won,6410,2026-10-10,2025-05-08,True,True,"Budget approved, moving to procurement."
+OPP-1057,Cobalt Group,LATAM,Technology,A. Rao,Outbound,Qualification,121866,2024-09-10,2025-11-28,False,False,"Renewal likely, happy with support."
+OPP-1058,Acme Industries,LATAM,Manufacturing,A. Rao,Outbound,Negotiation,4034,2025-06-06,2026-02-27,False,False,"Champion left the company, deal stalled."
+OPP-1059,Atlas Industries,NA,Retail,D. Patel,Partner,Qualification,10485,2026-05-03,2026-10-20,False,False,"Strong technical fit, exec sponsor engaged."
+OPP-1060,Meridian Labs,NA,Healthcare,C. Mehta,Web,Qualification,75543,2026-07-10,2025-10-24,False,False,"Budget approved, moving to procurement."
+OPP-1061,Pinnacle Corp,APAC,Technology,B. Singh,Event,Qualification,4673,2026-02-06,2026-12-20,False,False,"Renewal likely, happy with support."
+OPP-1062,Zenith Systems,NA,Manufacturing,A. Rao,Outbound,Closed Won,13784,2025-02-22,2026-11-19,True,True,Lost on missing SOC2 compliance.
+OPP-1063,Atlas Labs,APAC,Manufacturing,A. Rao,Partner,Closed Won,3679,2025-03-03,2026-10-24,True,True,"Renewal likely, happy with support."
+OPP-1064,Nova Systems,APAC,Retail,C. Mehta,Web,Closed Won,39793,2025-09-18,2025-10-02,True,True,Competitor Nimbus offered lower price.
+OPP-1065,Cobalt Group,NA,Manufacturing,E. Shah,Partner,Qualification,6132,2026-10-19,2026-10-02,False,False,"Renewal likely, happy with support."
+OPP-1066,Nova Labs,APAC,Finance,A. Rao,Referral,Qualification,250014,2026-07-21,2025-08-12,False,False,Waiting on legal review of MSA.
+OPP-1067,Summit Corp,APAC,Finance,A. Rao,Partner,Proposal,41332,2025-05-22,2025-08-03,False,False,"Champion left the company, deal stalled."
+OPP-1068,Pinnacle Labs,LATAM,Technology,B. Singh,Event,Closed Won,3768,2026-08-14,2026-10-25,True,True,"Budget approved, moving to procurement."
+OPP-1069,Orion Industries,EMEA,Retail,D. Patel,Web,Closed Lost,3118,2025-12-16,2025-12-06,True,False,Lost on missing SOC2 compliance.
+OPP-1070,Orion Group,APAC,Manufacturing,D. Patel,Partner,Closed Lost,121408,2024-08-04,2025-08-23,True,False,Lost on missing SOC2 compliance.
+OPP-1071,Cobalt Industries,LATAM,Finance,E. Shah,Event,Negotiation,75081,2024-07-07,2025-02-09,False,False,"Champion left the company, deal stalled."
+OPP-1072,Pinnacle Corp,APAC,Finance,E. Shah,Outbound,Qualification,120005,2025-10-19,2025-08-18,False,False,Price too high vs competitor Vega.
+OPP-1073,Cobalt Industries,LATAM,Technology,C. Mehta,Partner,Negotiation,12342,2025-04-23,2026-04-28,False,False,Price too high vs competitor Vega.
+OPP-1074,Atlas Systems,APAC,Technology,D. Patel,Web,Proposal,41951,2026-11-05,2025-03-17,False,False,"Strong technical fit, exec sponsor engaged."
+OPP-1075,Orion Labs,APAC,Retail,D. Patel,Web,Prospecting,121972,2024-07-28,2025-02-16,False,False,Waiting on legal review of MSA.
+OPP-1076,Atlas Industries,EMEA,Healthcare,C. Mehta,Referral,Closed Lost,120943,2026-07-11,2026-09-02,True,False,Competitor Nimbus offered lower price.
+OPP-1077,Orion Industries,EMEA,Technology,C. Mehta,Web,Proposal,248411,2024-11-23,2026-03-23,False,False,"Renewal likely, happy with support."
+OPP-1078,Meridian Corp,LATAM,Retail,B. Singh,Partner,Proposal,74687,2025-03-08,2025-03-06,False,False,"Budget approved, moving to procurement."
+OPP-1079,Zenith Group,NA,Technology,D. Patel,Event,Qualification,25731,2026-05-15,2025-08-10,False,False,"Renewal likely, happy with support."
+OPP-1080,Pinnacle Corp,EMEA,Healthcare,D. Patel,Outbound,Closed Won,41462,2025-12-09,2026-04-13,True,True,Waiting on legal review of MSA.
+OPP-1081,Atlas Labs,EMEA,Retail,D. Patel,Event,Closed Won,250696,2026-05-01,2026-05-01,True,True,Lost on missing SOC2 compliance.
+OPP-1082,Cobalt Labs,NA,Technology,A. Rao,Event,Closed Won,12543,2025-04-21,2026-11-25,True,True,"Strong technical fit, exec sponsor engaged."
+OPP-1083,Nova Labs,NA,Healthcare,B. Singh,Outbound,Prospecting,6725,2025-12-05,2026-06-24,False,False,Waiting on legal review of MSA.
+OPP-1084,Summit Labs,EMEA,Manufacturing,A. Rao,Referral,Negotiation,251867,2025-03-09,2026-05-24,False,False,Lost on missing SOC2 compliance.
+OPP-1085,Nova Corp,EMEA,Finance,E. Shah,Web,Closed Lost,251295,2026-11-13,2026-02-26,True,False,"Strong technical fit, exec sponsor engaged."
+OPP-1086,Vertex Industries,LATAM,Technology,E. Shah,Outbound,Proposal,74560,2026-11-09,2026-02-22,False,False,Waiting on legal review of MSA.
+OPP-1087,Zenith Labs,LATAM,Technology,B. Singh,Web,Closed Lost,121374,2024-11-03,2026-12-10,True,False,"Champion left the company, deal stalled."
+OPP-1088,Summit Group,LATAM,Retail,B. Singh,Partner,Proposal,13634,2025-02-04,2025-07-15,False,False,Competitor Nimbus offered lower price.
+OPP-1089,Nova Group,NA,Finance,A. Rao,Event,Closed Lost,5827,2026-07-09,2026-04-15,True,False,Waiting on legal review of MSA.
+OPP-1090,Vertex Group,EMEA,Technology,C. Mehta,Referral,Prospecting,251375,2025-04-04,2026-02-22,False,False,"Budget approved, moving to procurement."
+OPP-1091,Vertex Industries,APAC,Healthcare,E. Shah,Web,Closed Won,250270,2024-02-27,2025-10-07,True,True,"Renewal likely, happy with support."
+OPP-1092,Acme Labs,NA,Technology,C. Mehta,Referral,Closed Lost,26270,2024-03-18,2025-02-22,True,False,Waiting on legal review of MSA.
+OPP-1093,Pinnacle Corp,LATAM,Finance,E. Shah,Outbound,Prospecting,119724,2025-01-05,2025-12-03,False,False,Competitor Nimbus offered lower price.
+OPP-1094,Acme Labs,EMEA,Manufacturing,D. Patel,Partner,Negotiation,121208,2024-10-02,2026-08-21,False,False,Competitor Nimbus offered lower price.
+OPP-1095,Orion Systems,APAC,Manufacturing,E. Shah,Outbound,Negotiation,25491,2025-02-03,2025-02-05,False,False,"Renewal likely, happy with support."
+OPP-1096,Cobalt Industries,NA,Manufacturing,D. Patel,Referral,Negotiation,250874,2026-07-04,2025-11-21,False,False,Price too high vs competitor Vega.
+OPP-1097,Zenith Systems,APAC,Finance,B. Singh,Partner,Proposal,118389,2025-07-14,2026-07-11,False,False,Competitor Nimbus offered lower price.
+OPP-1098,Acme Group,APAC,Technology,D. Patel,Event,Prospecting,6049,2024-02-14,2026-03-18,False,False,Price too high vs competitor Vega.
+OPP-1099,Pinnacle Systems,NA,Healthcare,D. Patel,Referral,Closed Lost,74279,2026-01-10,2026-02-19,True,False,Competitor Nimbus offered lower price.
+OPP-1100,Atlas Corp,EMEA,Retail,C. Mehta,Web,Proposal,249141,2026-06-04,2025-07-28,False,False,"Budget approved, moving to procurement."
+OPP-1101,Nova Corp,EMEA,Healthcare,A. Rao,Web,Qualification,3743,2025-06-12,2025-10-22,False,False,Lost on missing SOC2 compliance.
+OPP-1102,Meridian Corp,EMEA,Healthcare,B. Singh,Outbound,Proposal,24276,2025-06-06,2026-10-20,False,False,"Champion left the company, deal stalled."
+OPP-1103,Vertex Group,EMEA,Finance,D. Patel,Web,Closed Won,39989,2025-08-22,2026-07-09,True,True,"Renewal likely, happy with support."
+OPP-1104,Atlas Group,EMEA,Technology,B. Singh,Event,Closed Won,119263,2026-08-17,2025-04-13,True,True,Lost on missing SOC2 compliance.
+OPP-1105,Vertex Labs,NA,Manufacturing,E. Shah,Referral,Closed Won,3031,2025-05-11,2026-12-14,True,True,Waiting on legal review of MSA.
+OPP-1106,Nova Systems,LATAM,Manufacturing,C. Mehta,Web,Prospecting,4883,2026-01-14,2025-06-19,False,False,Price too high vs competitor Vega.
+OPP-1107,Meridian Labs,NA,Manufacturing,E. Shah,Partner,Prospecting,74884,2025-03-26,2026-02-14,False,False,Competitor Nimbus offered lower price.
+OPP-1108,Zenith Corp,EMEA,Retail,E. Shah,Referral,Proposal,11364,2025-12-11,2025-02-17,False,False,Waiting on legal review of MSA.
+OPP-1109,Atlas Group,NA,Technology,B. Singh,Partner,Proposal,3599,2026-03-08,2026-04-06,False,False,"Strong technical fit, exec sponsor engaged."
+OPP-1110,Meridian Industries,LATAM,Technology,D. Patel,Partner,Closed Won,75633,2026-08-22,2026-11-11,True,True,"Renewal likely, happy with support."
+OPP-1111,Acme Systems,EMEA,Finance,C. Mehta,Web,Closed Won,73303,2026-01-12,2026-08-15,True,True,Competitor Nimbus offered lower price.
+OPP-1112,Atlas Labs,NA,Finance,E. Shah,Partner,Closed Won,75270,2026-07-15,2025-08-26,True,True,"Budget approved, moving to procurement."
+OPP-1113,Vertex Labs,EMEA,Healthcare,D. Patel,Partner,Closed Lost,249406,2025-02-26,2025-09-21,True,False,"Budget approved, moving to procurement."
+OPP-1114,Summit Labs,EMEA,Finance,A. Rao,Outbound,Proposal,249385,2025-07-14,2025-11-21,False,False,Price too high vs competitor Vega.
+OPP-1115,Zenith Systems,NA,Finance,C. Mehta,Partner,Qualification,248615,2026-11-20,2026-02-19,False,False,"Budget approved, moving to procurement."
+OPP-1116,Zenith Industries,EMEA,Manufacturing,E. Shah,Event,Closed Won,40635,2024-05-18,2026-03-22,True,True,"Champion left the company, deal stalled."
+OPP-1117,Meridian Industries,EMEA,Finance,A. Rao,Outbound,Proposal,249991,2024-04-11,2025-04-05,False,False,"Champion left the company, deal stalled."
+OPP-1118,Zenith Industries,NA,Manufacturing,A. Rao,Partner,Closed Won,38631,2026-03-20,2025-03-27,True,True,Waiting on legal review of MSA.
+OPP-1119,Orion Corp,APAC,Manufacturing,B. Singh,Event,Closed Won,26081,2024-08-20,2026-04-18,True,True,"Strong technical fit, exec sponsor engaged."
+OPP-1120,Atlas Group,NA,Finance,A. Rao,Partner,Negotiation,74714,2025-07-17,2025-04-26,False,False,Waiting on legal review of MSA.
+OPP-1121,Cobalt Group,NA,Finance,D. Patel,Outbound,Closed Won,76486,2024-12-28,2025-05-03,True,True,"Budget approved, moving to procurement."
+OPP-1122,Acme Group,LATAM,Retail,C. Mehta,Referral,Closed Lost,41623,2024-04-27,2026-01-14,True,False,Price too high vs competitor Vega.
+OPP-1123,Summit Labs,NA,Healthcare,A. Rao,Event,Closed Lost,26812,2025-04-01,2025-12-21,True,False,"Strong technical fit, exec sponsor engaged."
+OPP-1124,Orion Labs,NA,Healthcare,E. Shah,Outbound,Closed Won,40520,2024-12-16,2025-02-01,True,True,Price too high vs competitor Vega.
+OPP-1125,Atlas Industries,LATAM,Technology,A. Rao,Partner,Prospecting,3195,2025-04-10,2025-07-21,False,False,"Champion left the company, deal stalled."
+OPP-1126,Summit Systems,NA,Retail,D. Patel,Referral,Closed Won,11193,2026-04-23,2026-01-20,True,True,Competitor Nimbus offered lower price.
+OPP-1127,Pinnacle Corp,EMEA,Manufacturing,C. Mehta,Event,Negotiation,75078,2025-02-17,2025-07-28,False,False,"Champion left the company, deal stalled."
+OPP-1128,Cobalt Group,APAC,Healthcare,A. Rao,Event,Proposal,120691,2024-06-08,2025-10-24,False,False,Waiting on legal review of MSA.
+OPP-1129,Cobalt Corp,LATAM,Technology,C. Mehta,Referral,Closed Lost,119960,2024-11-15,2025-03-03,True,False,"Champion left the company, deal stalled."
+OPP-1130,Cobalt Group,NA,Finance,C. Mehta,Web,Closed Won,74631,2024-06-10,2026-05-02,True,True,Waiting on legal review of MSA.
+OPP-1131,Pinnacle Labs,LATAM,Finance,E. Shah,Event,Qualification,119801,2025-07-13,2026-06-06,False,False,Competitor Nimbus offered lower price.
+OPP-1132,Meridian Corp,APAC,Finance,C. Mehta,Partner,Closed Won,248739,2024-07-20,2026-06-04,True,True,Price too high vs competitor Vega.
+OPP-1133,Orion Systems,EMEA,Technology,D. Patel,Event,Qualification,5977,2025-06-15,2026-10-14,False,False,"Budget approved, moving to procurement."
+OPP-1134,Orion Corp,APAC,Finance,D. Patel,Outbound,Closed Lost,249794,2024-10-22,2025-03-03,True,False,"Champion left the company, deal stalled."
+OPP-1135,Pinnacle Group,APAC,Manufacturing,C. Mehta,Event,Closed Won,24818,2026-08-12,2025-10-05,True,True,Lost on missing SOC2 compliance.
+OPP-1136,Orion Labs,APAC,Manufacturing,B. Singh,Outbound,Closed Lost,40120,2024-12-06,2026-09-04,True,False,"Renewal likely, happy with support."
+OPP-1137,Cobalt Corp,LATAM,Technology,C. Mehta,Event,Closed Won,13493,2025-04-04,2025-08-06,True,True,Competitor Nimbus offered lower price.
+OPP-1138,Vertex Industries,EMEA,Healthcare,B. Singh,Referral,Negotiation,12915,2025-05-28,2025-06-17,False,False,"Strong technical fit, exec sponsor engaged."
+OPP-1139,Acme Industries,APAC,Manufacturing,D. Patel,Outbound,Prospecting,41291,2026-10-12,2025-10-03,False,False,Price too high vs competitor Vega.
+OPP-1140,Zenith Group,APAC,Healthcare,E. Shah,Outbound,Closed Won,25631,2026-02-05,2025-08-15,True,True,"Budget approved, moving to procurement."
+OPP-1141,Orion Industries,NA,Healthcare,C. Mehta,Referral,Closed Won,248226,2024-07-17,2025-09-05,True,True,Waiting on legal review of MSA.
+OPP-1142,Orion Systems,NA,Finance,E. Shah,Outbound,Closed Lost,4026,2026-05-28,2025-11-18,True,False,Competitor Nimbus offered lower price.
+OPP-1143,Acme Labs,EMEA,Technology,E. Shah,Event,Negotiation,10701,2024-10-19,2026-10-02,False,False,Lost on missing SOC2 compliance.
+OPP-1144,Pinnacle Corp,NA,Manufacturing,C. Mehta,Partner,Closed Won,5039,2025-10-21,2026-11-10,True,True,Competitor Nimbus offered lower price.
+OPP-1145,Meridian Industries,APAC,Finance,C. Mehta,Partner,Closed Won,39902,2024-08-14,2025-06-20,True,True,"Budget approved, moving to procurement."
+OPP-1146,Nova Group,NA,Healthcare,A. Rao,Web,Closed Won,23990,2026-09-04,2026-02-09,True,True,"Renewal likely, happy with support."
+OPP-1147,Cobalt Labs,APAC,Healthcare,B. Singh,Partner,Closed Lost,251695,2026-07-08,2025-06-19,True,False,"Strong technical fit, exec sponsor engaged."
+OPP-1148,Orion Corp,NA,Retail,C. Mehta,Web,Negotiation,6871,2025-08-01,2026-09-15,False,False,"Champion left the company, deal stalled."
+OPP-1149,Meridian Group,APAC,Finance,D. Patel,Event,Qualification,39170,2026-11-22,2025-02-14,False,False,"Champion left the company, deal stalled."
+OPP-1150,Pinnacle Systems,LATAM,Retail,C. Mehta,Outbound,Proposal,25266,2026-09-07,2026-02-13,False,False,Competitor Nimbus offered lower price.
+OPP-1151,Atlas Group,LATAM,Retail,A. Rao,Web,Prospecting,249388,2024-07-12,2026-03-07,False,False,"Champion left the company, deal stalled."
+OPP-1152,Summit Corp,NA,Manufacturing,E. Shah,Event,Prospecting,38610,2025-08-17,2025-06-20,False,False,Waiting on legal review of MSA.
+OPP-1153,Acme Labs,APAC,Finance,A. Rao,Partner,Negotiation,120305,2026-09-16,2026-08-27,False,False,"Renewal likely, happy with support."
+OPP-1154,Cobalt Industries,NA,Technology,E. Shah,Partner,Closed Won,5444,2026-12-21,2026-05-21,True,True,"Budget approved, moving to procurement."
+OPP-1155,Acme Systems,EMEA,Healthcare,A. Rao,Partner,Negotiation,249557,2026-10-25,2025-11-08,False,False,Waiting on legal review of MSA.
+OPP-1156,Acme Group,NA,Retail,B. Singh,Outbound,Proposal,40055,2025-12-07,2026-12-24,False,False,Waiting on legal review of MSA.
+OPP-1157,Summit Labs,APAC,Finance,E. Shah,Partner,Closed Lost,26918,2025-09-13,2025-08-18,True,False,Lost on missing SOC2 compliance.
+OPP-1158,Vertex Group,LATAM,Finance,D. Patel,Event,Closed Lost,13856,2025-09-10,2026-05-23,True,False,"Renewal likely, happy with support."
+OPP-1159,Meridian Industries,APAC,Technology,C. Mehta,Web,Qualification,41669,2026-11-18,2026-06-25,False,False,Waiting on legal review of MSA.
+OPP-1160,Atlas Corp,APAC,Healthcare,A. Rao,Outbound,Closed Lost,38876,2026-05-24,2025-09-09,True,False,Lost on missing SOC2 compliance.
+OPP-1161,Summit Labs,LATAM,Technology,B. Singh,Web,Qualification,118953,2026-09-08,2025-02-14,False,False,"Budget approved, moving to procurement."
+OPP-1162,Zenith Labs,EMEA,Technology,E. Shah,Referral,Proposal,13096,2025-08-21,2026-06-10,False,False,"Champion left the company, deal stalled."
+OPP-1163,Pinnacle Labs,NA,Finance,A. Rao,Web,Closed Lost,13825,2024-07-27,2025-07-26,True,False,"Renewal likely, happy with support."
+OPP-1164,Pinnacle Systems,LATAM,Finance,B. Singh,Web,Closed Won,40626,2024-06-10,2026-03-28,True,True,Waiting on legal review of MSA.
+OPP-1165,Orion Group,NA,Healthcare,E. Shah,Partner,Qualification,118762,2025-11-09,2025-12-11,False,False,Price too high vs competitor Vega.
+OPP-1166,Orion Corp,EMEA,Finance,D. Patel,Referral,Negotiation,3756,2024-07-22,2025-08-11,False,False,"Strong technical fit, exec sponsor engaged."
+OPP-1167,Summit Group,NA,Technology,A. Rao,Partner,Closed Won,120346,2025-05-19,2025-05-21,True,True,"Renewal likely, happy with support."
+OPP-1168,Summit Group,NA,Healthcare,B. Singh,Partner,Qualification,249273,2026-09-23,2025-11-10,False,False,"Budget approved, moving to procurement."
+OPP-1169,Zenith Systems,NA,Healthcare,E. Shah,Web,Negotiation,120249,2026-06-14,2026-09-26,False,False,"Strong technical fit, exec sponsor engaged."
+OPP-1170,Meridian Industries,NA,Finance,E. Shah,Partner,Negotiation,3252,2025-02-19,2025-10-18,False,False,Competitor Nimbus offered lower price.
+OPP-1171,Meridian Group,LATAM,Manufacturing,E. Shah,Web,Closed Won,6681,2026-10-16,2026-01-15,True,True,"Strong technical fit, exec sponsor engaged."
+OPP-1172,Atlas Systems,EMEA,Technology,D. Patel,Event,Closed Won,39042,2025-12-01,2025-12-07,True,True,Competitor Nimbus offered lower price.
+OPP-1173,Meridian Group,LATAM,Finance,D. Patel,Partner,Negotiation,4175,2024-02-16,2026-03-25,False,False,Price too high vs competitor Vega.
+OPP-1174,Pinnacle Industries,LATAM,Retail,B. Singh,Referral,Proposal,73544,2026-11-28,2026-02-06,False,False,"Champion left the company, deal stalled."
+OPP-1175,Vertex Industries,NA,Manufacturing,C. Mehta,Referral,Closed Won,120230,2025-08-22,2026-09-13,True,True,"Renewal likely, happy with support."
+OPP-1176,Acme Labs,NA,Healthcare,A. Rao,Web,Qualification,250704,2026-02-02,2026-10-25,False,False,"Champion left the company, deal stalled."
+OPP-1177,Vertex Industries,NA,Technology,B. Singh,Outbound,Proposal,4002,2026-12-28,2025-07-15,False,False,"Renewal likely, happy with support."
+OPP-1178,Meridian Industries,NA,Manufacturing,C. Mehta,Event,Qualification,75449,2026-10-11,2026-04-10,False,False,"Champion left the company, deal stalled."
+OPP-1179,Acme Group,APAC,Manufacturing,E. Shah,Event,Closed Won,120780,2026-12-06,2026-09-16,True,True,Price too high vs competitor Vega.
+OPP-1180,Vertex Industries,APAC,Healthcare,D. Patel,Web,Proposal,250203,2025-07-06,2026-04-28,False,False,Price too high vs competitor Vega.
+OPP-1181,Zenith Labs,EMEA,Manufacturing,C. Mehta,Web,Closed Lost,38994,2026-09-05,2026-04-11,True,False,Lost on missing SOC2 compliance.
+OPP-1182,Cobalt Group,NA,Manufacturing,B. Singh,Event,Prospecting,73161,2025-11-20,2025-04-26,False,False,"Renewal likely, happy with support."
+OPP-1183,Atlas Group,NA,Manufacturing,B. Singh,Outbound,Closed Lost,118480,2024-04-07,2026-04-23,True,False,Waiting on legal review of MSA.
+OPP-1184,Pinnacle Systems,LATAM,Manufacturing,A. Rao,Partner,Closed Won,119471,2025-08-18,2026-05-12,True,True,Waiting on legal review of MSA.
+OPP-1185,Acme Labs,APAC,Retail,E. Shah,Outbound,Closed Lost,5304,2025-06-14,2025-12-05,True,False,Price too high vs competitor Vega.
+OPP-1186,Zenith Labs,APAC,Finance,D. Patel,Partner,Qualification,40333,2024-06-08,2025-08-18,False,False,"Strong technical fit, exec sponsor engaged."
+OPP-1187,Zenith Labs,EMEA,Retail,A. Rao,Web,Qualification,120238,2025-03-05,2026-03-18,False,False,"Champion left the company, deal stalled."
+OPP-1188,Acme Corp,NA,Retail,D. Patel,Event,Closed Won,118947,2025-03-27,2025-12-05,True,True,"Champion left the company, deal stalled."
+OPP-1189,Atlas Corp,LATAM,Technology,A. Rao,Outbound,Closed Won,119998,2026-10-16,2025-01-18,True,True,"Renewal likely, happy with support."
+OPP-1190,Meridian Labs,NA,Healthcare,B. Singh,Outbound,Negotiation,250858,2025-01-17,2026-03-04,False,False,"Renewal likely, happy with support."
+OPP-1191,Orion Corp,NA,Finance,A. Rao,Web,Closed Lost,26929,2025-07-03,2026-08-19,True,False,Competitor Nimbus offered lower price.
+OPP-1192,Meridian Corp,LATAM,Manufacturing,C. Mehta,Outbound,Proposal,5608,2025-09-16,2025-12-06,False,False,Competitor Nimbus offered lower price.
+OPP-1193,Acme Industries,APAC,Retail,E. Shah,Web,Closed Lost,250835,2024-04-07,2026-05-02,True,False,"Budget approved, moving to procurement."
+OPP-1194,Vertex Corp,NA,Retail,D. Patel,Outbound,Closed Lost,73590,2025-01-07,2026-02-10,True,False,Waiting on legal review of MSA.
+OPP-1195,Summit Systems,EMEA,Technology,D. Patel,Referral,Proposal,120966,2026-03-26,2025-09-24,False,False,Competitor Nimbus offered lower price.
+OPP-1196,Nova Group,LATAM,Healthcare,C. Mehta,Outbound,Proposal,249336,2026-10-13,2025-11-09,False,False,Price too high vs competitor Vega.
+OPP-1197,Acme Industries,EMEA,Finance,B. Singh,Partner,Proposal,38351,2026-10-22,2026-04-23,False,False,"Budget approved, moving to procurement."
+OPP-1198,Cobalt Group,APAC,Technology,B. Singh,Web,Closed Won,3021,2025-06-04,2026-08-12,True,True,"Budget approved, moving to procurement."
+OPP-1199,Atlas Corp,EMEA,Retail,E. Shah,Event,Proposal,38423,2026-09-17,2025-02-12,False,False,Price too high vs competitor Vega.
+OPP-1200,Vertex Corp,LATAM,Healthcare,B. Singh,Event,Prospecting,5968,2025-07-25,2025-10-17,False,False,"Renewal likely, happy with support."
+OPP-1201,Acme Industries,APAC,Finance,B. Singh,Partner,Qualification,39130,2024-02-06,2026-05-16,False,False,Lost on missing SOC2 compliance.
+OPP-1202,Summit Labs,LATAM,Retail,B. Singh,Event,Negotiation,39360,2024-05-01,2026-06-15,False,False,Waiting on legal review of MSA.
+OPP-1203,Cobalt Systems,LATAM,Retail,B. Singh,Event,Closed Won,23727,2026-04-16,2026-06-10,True,True,Price too high vs competitor Vega.
+OPP-1204,Atlas Corp,EMEA,Manufacturing,B. Singh,Partner,Qualification,73818,2025-06-04,2025-11-25,False,False,"Renewal likely, happy with support."
+OPP-1205,Zenith Systems,NA,Manufacturing,D. Patel,Web,Closed Lost,38570,2024-07-22,2026-04-09,True,False,"Strong technical fit, exec sponsor engaged."
+OPP-1206,Summit Group,EMEA,Technology,B. Singh,Event,Closed Lost,75075,2025-10-13,2026-09-02,True,False,"Budget approved, moving to procurement."
+OPP-1207,Nova Systems,EMEA,Technology,A. Rao,Event,Closed Won,120649,2024-10-21,2026-06-26,True,True,Lost on missing SOC2 compliance.
+OPP-1208,Nova Corp,LATAM,Retail,E. Shah,Referral,Negotiation,120356,2026-09-19,2025-08-12,False,False,Waiting on legal review of MSA.
+OPP-1209,Cobalt Labs,NA,Finance,C. Mehta,Event,Closed Lost,41770,2025-02-10,2025-02-27,True,False,"Strong technical fit, exec sponsor engaged."
+OPP-1210,Nova Group,APAC,Technology,C. Mehta,Web,Closed Won,38399,2026-08-12,2026-12-23,True,True,Competitor Nimbus offered lower price.
+OPP-1211,Pinnacle Group,NA,Retail,B. Singh,Event,Prospecting,121277,2025-11-04,2025-12-08,False,False,Price too high vs competitor Vega.
+OPP-1212,Cobalt Systems,NA,Manufacturing,E. Shah,Partner,Closed Lost,10763,2024-07-21,2026-07-01,True,False,Price too high vs competitor Vega.
+OPP-1213,Pinnacle Industries,NA,Finance,C. Mehta,Referral,Prospecting,250882,2024-04-09,2025-10-04,False,False,"Strong technical fit, exec sponsor engaged."
+OPP-1214,Atlas Systems,EMEA,Finance,C. Mehta,Partner,Prospecting,119283,2026-08-17,2026-10-13,False,False,"Budget approved, moving to procurement."
+OPP-1215,Orion Corp,APAC,Technology,B. Singh,Event,Closed Lost,73347,2026-05-20,2025-06-04,True,False,"Budget approved, moving to procurement."
+OPP-1216,Zenith Corp,NA,Retail,B. Singh,Partner,Negotiation,74571,2025-10-05,2026-03-16,False,False,"Renewal likely, happy with support."
+OPP-1217,Meridian Group,NA,Manufacturing,E. Shah,Outbound,Prospecting,6545,2025-08-20,2026-01-16,False,False,"Strong technical fit, exec sponsor engaged."
+OPP-1218,Atlas Labs,EMEA,Healthcare,C. Mehta,Web,Proposal,249818,2025-07-23,2026-03-03,False,False,"Renewal likely, happy with support."
+OPP-1219,Meridian Systems,EMEA,Finance,E. Shah,Event,Qualification,40316,2025-03-25,2026-09-17,False,False,"Champion left the company, deal stalled."
+OPP-1220,Acme Systems,LATAM,Finance,C. Mehta,Web,Closed Won,38419,2025-09-07,2025-05-28,True,True,"Strong technical fit, exec sponsor engaged."
+OPP-1221,Zenith Corp,LATAM,Healthcare,E. Shah,Referral,Closed Lost,251021,2024-04-07,2026-12-20,True,False,Lost on missing SOC2 compliance.
+OPP-1222,Orion Group,APAC,Retail,C. Mehta,Outbound,Closed Lost,74151,2024-10-12,2025-06-23,True,False,Competitor Nimbus offered lower price.
+OPP-1223,Meridian Group,NA,Healthcare,C. Mehta,Referral,Prospecting,250686,2025-01-09,2025-12-28,False,False,Price too high vs competitor Vega.
+OPP-1224,Zenith Corp,EMEA,Manufacturing,E. Shah,Event,Negotiation,119696,2026-11-09,2026-08-03,False,False,Waiting on legal review of MSA.
+OPP-1225,Zenith Corp,APAC,Technology,E. Shah,Partner,Negotiation,6559,2025-06-19,2025-12-15,False,False,Lost on missing SOC2 compliance.
+OPP-1226,Atlas Labs,NA,Retail,D. Patel,Event,Closed Lost,26392,2024-08-09,2026-06-18,True,False,"Champion left the company, deal stalled."
+OPP-1227,Acme Corp,LATAM,Healthcare,B. Singh,Event,Prospecting,6806,2026-08-01,2025-08-15,False,False,"Budget approved, moving to procurement."
+OPP-1228,Zenith Labs,NA,Technology,D. Patel,Event,Closed Lost,24025,2025-02-21,2025-06-22,True,False,Lost on missing SOC2 compliance.
+OPP-1229,Atlas Systems,NA,Retail,D. Patel,Web,Proposal,3874,2024-12-04,2026-02-05,False,False,"Champion left the company, deal stalled."
+OPP-1230,Meridian Corp,EMEA,Technology,C. Mehta,Event,Closed Won,11956,2024-07-23,2025-04-13,True,True,"Renewal likely, happy with support."
+OPP-1231,Vertex Corp,LATAM,Finance,B. Singh,Referral,Prospecting,10280,2024-11-22,2025-10-21,False,False,Price too high vs competitor Vega.
+OPP-1232,Summit Industries,APAC,Manufacturing,C. Mehta,Referral,Closed Won,3573,2025-04-03,2025-10-24,True,True,Lost on missing SOC2 compliance.
+OPP-1233,Zenith Systems,APAC,Healthcare,E. Shah,Outbound,Qualification,75457,2024-04-18,2026-12-01,False,False,Lost on missing SOC2 compliance.
+OPP-1234,Meridian Systems,NA,Manufacturing,E. Shah,Web,Closed Won,251677,2025-11-02,2025-08-13,True,True,"Champion left the company, deal stalled."
+OPP-1235,Zenith Group,NA,Manufacturing,A. Rao,Web,Closed Lost,251436,2025-03-13,2026-06-18,True,False,Competitor Nimbus offered lower price.
+OPP-1236,Pinnacle Systems,LATAM,Manufacturing,D. Patel,Web,Prospecting,249630,2024-01-02,2026-11-23,False,False,"Budget approved, moving to procurement."
+OPP-1237,Nova Corp,EMEA,Finance,D. Patel,Referral,Qualification,13990,2025-02-17,2025-09-11,False,False,"Champion left the company, deal stalled."
+OPP-1238,Cobalt Systems,NA,Technology,A. Rao,Referral,Qualification,75493,2025-02-15,2025-05-22,False,False,"Champion left the company, deal stalled."
+OPP-1239,Meridian Group,APAC,Technology,A. Rao,Event,Qualification,251368,2025-09-17,2026-03-12,False,False,Price too high vs competitor Vega.
+OPP-1240,Pinnacle Systems,APAC,Technology,D. Patel,Outbound,Qualification,75570,2024-05-23,2025-08-15,False,False,"Budget approved, moving to procurement."
+OPP-1241,Pinnacle Systems,EMEA,Technology,A. Rao,Referral,Proposal,120960,2025-02-19,2025-04-24,False,False,"Champion left the company, deal stalled."
+OPP-1242,Orion Corp,LATAM,Finance,C. Mehta,Web,Negotiation,248144,2025-03-06,2026-04-11,False,False,Waiting on legal review of MSA.
+OPP-1243,Nova Industries,APAC,Finance,C. Mehta,Web,Prospecting,13294,2026-01-06,2025-07-03,False,False,"Strong technical fit, exec sponsor engaged."
+OPP-1244,Atlas Systems,LATAM,Healthcare,E. Shah,Referral,Prospecting,249244,2024-05-19,2025-08-12,False,False,"Budget approved, moving to procurement."
+OPP-1245,Cobalt Group,LATAM,Finance,A. Rao,Referral,Prospecting,74418,2025-01-08,2025-06-01,False,False,Lost on missing SOC2 compliance.
+OPP-1246,Pinnacle Group,LATAM,Finance,D. Patel,Web,Proposal,23381,2024-03-23,2025-04-28,False,False,Competitor Nimbus offered lower price.
+OPP-1247,Meridian Group,NA,Finance,C. Mehta,Event,Negotiation,75325,2026-07-03,2025-07-22,False,False,Price too high vs competitor Vega.
+OPP-1248,Meridian Group,EMEA,Healthcare,A. Rao,Referral,Closed Won,39113,2026-06-11,2025-02-07,True,True,"Strong technical fit, exec sponsor engaged."
+OPP-1249,Nova Industries,APAC,Technology,A. Rao,Referral,Negotiation,26951,2025-02-18,2025-08-10,False,False,"Renewal likely, happy with support."
+OPP-1250,Cobalt Corp,NA,Finance,D. Patel,Outbound,Closed Lost,13423,2026-10-02,2026-03-03,True,False,"Champion left the company, deal stalled."
+OPP-1251,Atlas Corp,NA,Technology,D. Patel,Web,Closed Won,41500,2025-03-01,2026-09-24,True,True,"Budget approved, moving to procurement."
+OPP-1252,Zenith Corp,EMEA,Retail,E. Shah,Event,Prospecting,13373,2024-04-05,2026-06-22,False,False,Competitor Nimbus offered lower price.
+OPP-1253,Summit Labs,EMEA,Technology,D. Patel,Web,Prospecting,41314,2024-04-21,2025-02-28,False,False,"Budget approved, moving to procurement."
+OPP-1254,Vertex Labs,APAC,Healthcare,B. Singh,Event,Closed Lost,38120,2025-12-13,2026-11-14,True,False,"Renewal likely, happy with support."
+OPP-1255,Pinnacle Labs,LATAM,Retail,D. Patel,Web,Proposal,75527,2024-01-20,2025-11-10,False,False,Competitor Nimbus offered lower price.
+OPP-1256,Pinnacle Industries,EMEA,Manufacturing,C. Mehta,Partner,Qualification,121623,2024-07-07,2025-11-26,False,False,"Strong technical fit, exec sponsor engaged."
+OPP-1257,Atlas Group,NA,Technology,C. Mehta,Web,Proposal,39107,2026-09-11,2025-01-11,False,False,"Strong technical fit, exec sponsor engaged."
+OPP-1258,Cobalt Systems,EMEA,Healthcare,E. Shah,Partner,Negotiation,4015,2026-04-06,2025-05-18,False,False,Waiting on legal review of MSA.
+OPP-1259,Cobalt Corp,APAC,Retail,E. Shah,Referral,Closed Lost,74302,2024-03-08,2026-10-01,True,False,Lost on missing SOC2 compliance.
+OPP-1260,Vertex Industries,NA,Technology,E. Shah,Partner,Closed Lost,12008,2025-09-10,2025-02-02,True,False,"Champion left the company, deal stalled."
+OPP-1261,Acme Labs,NA,Retail,B. Singh,Web,Proposal,11395,2026-04-26,2025-06-02,False,False,Waiting on legal review of MSA.
+OPP-1262,Summit Corp,NA,Healthcare,D. Patel,Partner,Closed Lost,40400,2025-12-22,2025-06-10,True,False,Waiting on legal review of MSA.
+OPP-1263,Vertex Labs,LATAM,Finance,C. Mehta,Referral,Qualification,249461,2026-12-20,2025-11-19,False,False,"Budget approved, moving to procurement."
+OPP-1264,Summit Corp,NA,Retail,A. Rao,Partner,Closed Won,251157,2026-10-13,2025-03-20,True,True,"Budget approved, moving to procurement."
+OPP-1265,Zenith Corp,APAC,Manufacturing,A. Rao,Event,Proposal,23687,2024-04-12,2025-12-22,False,False,Lost on missing SOC2 compliance.
+OPP-1266,Nova Group,LATAM,Healthcare,D. Patel,Partner,Qualification,248442,2024-06-09,2025-01-13,False,False,Price too high vs competitor Vega.
+OPP-1267,Acme Industries,EMEA,Finance,A. Rao,Event,Proposal,41230,2025-02-27,2025-03-15,False,False,"Renewal likely, happy with support."
+OPP-1268,Summit Labs,LATAM,Technology,D. Patel,Referral,Closed Lost,38659,2024-06-06,2025-09-03,True,False,Price too high vs competitor Vega.
+OPP-1269,Orion Industries,NA,Technology,A. Rao,Partner,Qualification,11676,2024-06-07,2026-11-10,False,False,"Strong technical fit, exec sponsor engaged."
+OPP-1270,Acme Labs,NA,Healthcare,C. Mehta,Web,Qualification,4206,2025-01-14,2026-04-04,False,False,"Strong technical fit, exec sponsor engaged."
+OPP-1271,Pinnacle Industries,LATAM,Healthcare,C. Mehta,Partner,Closed Lost,41665,2025-07-16,2026-02-21,True,False,Waiting on legal review of MSA.
+OPP-1272,Acme Group,NA,Technology,A. Rao,Event,Qualification,39078,2024-05-15,2025-05-19,False,False,Price too high vs competitor Vega.
+OPP-1273,Pinnacle Industries,LATAM,Retail,B. Singh,Partner,Closed Lost,6443,2026-04-18,2026-09-14,True,False,"Renewal likely, happy with support."
+OPP-1274,Nova Group,NA,Healthcare,B. Singh,Referral,Prospecting,76688,2026-01-17,2025-02-25,False,False,"Budget approved, moving to procurement."
+OPP-1275,Summit Corp,EMEA,Technology,D. Patel,Outbound,Prospecting,13369,2024-11-14,2025-10-09,False,False,Price too high vs competitor Vega.
+OPP-1276,Meridian Industries,NA,Retail,E. Shah,Outbound,Closed Won,248050,2025-09-15,2026-02-14,True,True,Competitor Nimbus offered lower price.
+OPP-1277,Summit Industries,LATAM,Retail,E. Shah,Partner,Closed Lost,26553,2026-02-26,2026-07-09,True,False,"Champion left the company, deal stalled."
+OPP-1278,Summit Labs,NA,Technology,D. Patel,Event,Qualification,75788,2025-03-20,2026-01-13,False,False,Waiting on legal review of MSA.
+OPP-1279,Orion Industries,LATAM,Finance,C. Mehta,Partner,Prospecting,250013,2025-05-09,2025-04-05,False,False,Competitor Nimbus offered lower price.
+OPP-1280,Vertex Corp,EMEA,Finance,E. Shah,Partner,Qualification,41110,2024-07-24,2026-01-17,False,False,"Budget approved, moving to procurement."
+OPP-1281,Acme Systems,LATAM,Technology,C. Mehta,Referral,Closed Won,10789,2026-10-01,2025-01-08,True,True,"Renewal likely, happy with support."
+OPP-1282,Orion Corp,APAC,Manufacturing,E. Shah,Partner,Proposal,121780,2025-09-13,2025-11-01,False,False,"Budget approved, moving to procurement."
+OPP-1283,Zenith Industries,EMEA,Finance,A. Rao,Partner,Closed Lost,24410,2025-10-18,2025-05-24,True,False,"Champion left the company, deal stalled."
+OPP-1284,Orion Systems,LATAM,Retail,A. Rao,Web,Qualification,12651,2026-04-28,2025-11-07,False,False,"Strong technical fit, exec sponsor engaged."
+OPP-1285,Orion Industries,APAC,Manufacturing,D. Patel,Event,Closed Lost,248034,2026-03-20,2025-05-20,True,False,"Strong technical fit, exec sponsor engaged."
+OPP-1286,Acme Corp,APAC,Retail,E. Shah,Outbound,Qualification,76376,2025-05-22,2026-10-04,False,False,"Renewal likely, happy with support."
+OPP-1287,Zenith Labs,APAC,Healthcare,B. Singh,Outbound,Qualification,24132,2024-08-03,2026-05-09,False,False,Lost on missing SOC2 compliance.
+OPP-1288,Zenith Labs,LATAM,Finance,C. Mehta,Partner,Closed Lost,25788,2026-07-22,2025-12-01,True,False,Price too high vs competitor Vega.
+OPP-1289,Cobalt Corp,NA,Retail,D. Patel,Event,Proposal,76342,2024-10-23,2025-06-24,False,False,"Renewal likely, happy with support."
+OPP-1290,Orion Labs,NA,Finance,A. Rao,Referral,Closed Lost,23399,2026-09-06,2026-03-24,True,False,Waiting on legal review of MSA.
+OPP-1291,Nova Industries,EMEA,Manufacturing,A. Rao,Outbound,Qualification,24522,2025-07-26,2026-10-10,False,False,Competitor Nimbus offered lower price.
+OPP-1292,Nova Labs,EMEA,Healthcare,B. Singh,Referral,Negotiation,250788,2024-09-04,2026-09-10,False,False,Waiting on legal review of MSA.
+OPP-1293,Summit Labs,NA,Finance,A. Rao,Web,Proposal,26532,2026-08-05,2025-02-16,False,False,"Strong technical fit, exec sponsor engaged."
+OPP-1294,Nova Systems,LATAM,Manufacturing,D. Patel,Partner,Qualification,12005,2024-10-25,2025-03-20,False,False,Price too high vs competitor Vega.
+OPP-1295,Pinnacle Group,NA,Technology,A. Rao,Referral,Prospecting,26891,2026-04-24,2025-06-25,False,False,Lost on missing SOC2 compliance.
+OPP-1296,Acme Systems,APAC,Finance,D. Patel,Outbound,Closed Won,4571,2025-05-05,2026-03-03,True,True,Waiting on legal review of MSA.
+OPP-1297,Nova Corp,EMEA,Healthcare,B. Singh,Referral,Proposal,39471,2026-03-11,2025-03-26,False,False,Lost on missing SOC2 compliance.
+OPP-1298,Orion Labs,EMEA,Retail,A. Rao,Web,Closed Won,4501,2026-09-06,2025-07-21,True,True,"Champion left the company, deal stalled."
+OPP-1299,Meridian Industries,NA,Technology,C. Mehta,Partner,Prospecting,38506,2024-07-15,2026-08-23,False,False,Competitor Nimbus offered lower price.

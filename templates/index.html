@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark light">
+    <title>Mini Local Analytics Assistant</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+    <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+
+    <div class="app-shell">
+      <aside class="sidebar" id="sidebar" aria-label="Application navigation">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+          <div>
+            <p class="eyebrow">LOCAL INSIGHTS</p>
+            <p class="brand-name">Mini Local<br>Analytics Assistant</p>
+          </div>
+        </div>
+
+        <nav class="primary-nav" aria-label="Dashboard sections">
+          <button class="nav-link is-active" type="button" data-view-target="ask" aria-current="page">
+            <span class="nav-icon" aria-hidden="true">✦</span>
+            Ask Question
+          </button>
+          <button class="nav-link" type="button" data-view-target="history">
+            <span class="nav-icon" aria-hidden="true">◷</span>
+            Query History
+          </button>
+          <button class="nav-link" type="button" data-view-target="charts">
+            <span class="nav-icon" aria-hidden="true">◒</span>
+            Charts
+          </button>
+          <button class="nav-link" type="button" data-view-target="about">
+            <span class="nav-icon" aria-hidden="true">i</span>
+            About
+          </button>
+        </nav>
+
+        <section class="status-card" aria-labelledby="system-status-title">
+          <div class="status-card-heading">
+            <span class="status-dot" id="status-dot" aria-hidden="true"></span>
+            <h2 id="system-status-title">System status</h2>
+          </div>
+          <dl class="status-list" id="system-status-list" aria-live="polite">
+            <div class="status-row">
+              <dt>Checking service</dt>
+              <dd>…</dd>
+            </div>
+          </dl>
+        </section>
+
+        <button class="clear-session sidebar-clear" type="button" data-clear-session>
+          <span aria-hidden="true">↺</span>
+          Clear Session
+        </button>
+      </aside>
+
+      <main class="main-content" id="main-content">
+        <header class="topbar">
+          <div class="topbar-leading">
+            <button class="icon-button nav-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="sidebar">
+              <span class="sr-only">Toggle navigation</span>
+              <span aria-hidden="true">☰</span>
+            </button>
+            <div>
+              <p class="eyebrow">ANALYTICS WORKSPACE</p>
+              <h1>Ask better questions of your pipeline.</h1>
+              <p class="topbar-subtitle">Grounded answers and local chart rendering from your opportunity data.</p>
+            </div>
+          </div>
+          <div class="topbar-actions" aria-label="Page actions">
+            <button class="icon-button theme-toggle" id="theme-toggle" type="button" aria-pressed="false">
+              <span class="theme-toggle-icon" aria-hidden="true">☼</span>
+              <span class="theme-toggle-label">Light theme</span>
+            </button>
+            <button class="secondary-button compact-button" type="button" data-view-target="about">About</button>
+            <button class="secondary-button compact-button" type="button" data-clear-session>Clear session</button>
+          </div>
+        </header>
+
+        <p class="sr-only" id="live-region" aria-live="polite" aria-atomic="true"></p>
+
+        <section class="view is-active" id="view-ask" data-view="ask" tabindex="-1">
+          <article class="card question-card" aria-labelledby="question-heading">
+            <div class="card-heading question-heading">
+              <div>
+                <p class="eyebrow">NEW ANALYSIS</p>
+                <h2 id="question-heading">Ask a question about your data</h2>
+              </div>
+              <p class="card-kicker">Press Enter to ask. Use Shift + Enter for a new line.</p>
+            </div>
+
+            <form id="query-form" novalidate>
+              <label class="sr-only" for="question-input">Your analytics question</label>
+              <textarea id="question-input" name="question" rows="3" maxlength="2000" placeholder="For example, what is the win rate by region?" aria-describedby="question-help question-message" required></textarea>
+              <p class="field-help" id="question-help">Ask about opportunities, pipeline, regions, stages, owners, or trends.</p>
+              <p class="field-message" id="question-message" role="status" aria-live="polite"></p>
+
+              <div class="query-controls">
+                <div class="chart-controls">
+                  <label class="toggle-label" for="chart-requested">
+                    <input id="chart-requested" name="chart_requested" type="checkbox">
+                    <span class="toggle-track" aria-hidden="true"><span></span></span>
+                    <span>Generate chart</span>
+                  </label>
+                  <label class="select-label" for="chart-type">
+                    <span>Preferred chart</span>
+                    <select id="chart-type" name="chart_type" disabled>
+                      <option value="auto">Automatic</option>
+                      <option value="bar">Bar</option>
+                      <option value="line">Line</option>
+                      <option value="pie">Pie</option>
+                      <option value="scatter">Scatter</option>
+                    </select>
+                  </label>
+                </div>
+                <button class="primary-button ask-button" id="ask-button" type="submit">
+                  <span class="ask-button-label">Ask question</span>
+                  <span class="loading-indicator" aria-hidden="true"></span>
+                </button>
+              </div>
+            </form>
+
+            <div class="examples" aria-labelledby="examples-heading">
+              <p class="examples-label" id="examples-heading">Try an example</p>
+              <div class="example-list">
+                <button class="example-chip" type="button" data-example-question="What is the overall win rate?">Overall win rate</button>
+                <button class="example-chip" type="button" data-example-question="What is the win rate by region?">Win rate by region</button>
+                <button class="example-chip" type="button" data-example-question="Total open pipeline amount by stage.">Open pipeline by stage</button>
+                <button class="example-chip" type="button" data-example-question="Top 5 accounts by total opportunity value.">Top 5 accounts</button>
+                <button class="example-chip" type="button" data-example-question="How many opportunities did each owner close won?">Closed-won by owner</button>
+                <button class="example-chip" type="button" data-example-question="How many opportunities did each owner close won — and chart it?">Closed-won chart</button>
+                <button class="example-chip" type="button" data-example-question="Show total pipeline by region as a bar chart.">Pipeline bar chart</button>
+                <button class="example-chip" type="button" data-example-question="Show opportunity count by created date as a line chart.">Opportunity trend</button>
+              </div>
+            </div>
+          </article>
+
+          <div class="workspace-grid">
+            <article class="card results-card" id="results-card" hidden aria-labelledby="results-heading">
+              <div class="card-heading results-heading">
+                <div>
+                  <p class="eyebrow" id="result-status">RESULT</p>
+                  <h2 id="results-heading">Analysis result</h2>
+                </div>
+                <p class="row-meta" id="row-meta"></p>
+              </div>
+              <div class="asked-block" id="asked-block" hidden>
+                <p class="asked-label">You asked</p>
+                <p class="asked-question" id="asked-question"></p>
+              </div>
+              <p class="answer-text" id="answer-text"></p>
+              <p class="result-warning" id="answer-warning" hidden role="status"></p>
+              <p class="truncation-note" id="truncation-note" hidden></p>
+              <div class="table-wrap" tabindex="0" aria-label="Query result table">
+                <table id="result-table">
+                  <caption class="sr-only" id="result-table-caption">Query result rows</caption>
+                  <thead id="result-table-head"></thead>
+                  <tbody id="result-table-body"></tbody>
+                </table>
+              </div>
+              <p class="empty-result" id="empty-result" hidden>No rows returned.</p>
+            </article>
+
+            <article class="card chart-card" id="chart-card" aria-labelledby="chart-heading">
+              <div class="card-heading">
+                <div>
+                  <p class="eyebrow">VISUALIZATION</p>
+                  <h2 id="chart-heading">Chart</h2>
+                </div>
+                <span class="chart-type-badge" id="chart-type-badge" hidden></span>
+              </div>
+              <div class="chart-empty" id="chart-empty">
+                <span class="chart-empty-icon" aria-hidden="true">◔</span>
+                <p>No chart requested yet.</p>
+                <span>Enable “Generate chart” when you ask a question to see a local visualization here.</span>
+              </div>
+              <figure class="chart-figure" id="chart-figure" hidden>
+                <img id="chart-image" alt="">
+                <figcaption id="chart-note" hidden></figcaption>
+              </figure>
+              <p class="chart-message" id="chart-message" hidden role="status"></p>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" id="view-history" data-view="history" hidden tabindex="-1" aria-labelledby="history-heading">
+          <article class="card full-card">
+            <div class="card-heading">
+              <div>
+                <p class="eyebrow">SAVED LOCALLY</p>
+                <h2 id="history-heading">Query history</h2>
+              </div>
+              <p class="card-kicker">Saved on this machine and kept until you delete it.</p>
+            </div>
+            <p class="empty-state" id="history-empty">Your completed questions will appear here.</p>
+            <ol class="history-list" id="history-list" aria-label="Recent questions"></ol>
+            <div class="history-actions">
+              <button class="secondary-button compact-button" type="button" data-clear-history>Clear saved history</button>
+            </div>
+          </article>
+        </section>
+
+        <section class="view" id="view-charts" data-view="charts" hidden tabindex="-1" aria-labelledby="charts-heading">
+          <article class="card full-card">
+            <div class="card-heading">
+              <div>
+                <p class="eyebrow">SAVED LOCALLY</p>
+                <h2 id="charts-heading">Charts</h2>
+              </div>
+              <p class="card-kicker">Charts from your saved history, kept until you delete it.</p>
+            </div>
+            <p class="empty-state" id="charts-empty">Generate a chart to build your gallery.</p>
+            <div class="chart-gallery" id="chart-gallery" aria-label="Saved chart gallery"></div>
+          </article>
+        </section>
+
+        <section class="view" id="view-about" data-view="about" hidden tabindex="-1" aria-labelledby="about-heading">
+          <article class="card about-card">
+            <p class="eyebrow">ABOUT THIS WORKSPACE</p>
+            <h2 id="about-heading">Local analytics, clear boundaries.</h2>
+            <p>Mini Local Analytics Assistant helps you explore synthetic Salesforce opportunity data using plain-English questions.</p>
+            <div class="about-grid">
+              <section>
+                <h3>How it works</h3>
+                <p>Submit one question at a time to receive a grounded answer, the returned result rows, and an optional locally rendered chart.</p>
+              </section>
+              <section>
+                <h3>Privacy</h3>
+                <p>CSV storage, DuckDB execution, SQL validation, result handling, and chart rendering are local. The configured Groq API receives the information required for SQL generation and answer phrasing.</p>
+              </section>
+              <section>
+                <h3>Session behavior</h3>
+                <p>Completed questions and their answers are saved on this machine in a local history database and kept until you delete them with “Clear saved history”. “Clear session” only clears what is on screen. The gallery links to chart images already on disk; if a chart file is removed the entry remains and is marked unavailable. History never runs a question again automatically and is never sent to the language model.</p>
+              </section>
+              <section>
+                <h3>Deliberately simple</h3>
+                <p>This is a single-user local workspace. It has no raw SQL interface, uploads, conversational memory, or multi-user support.</p>
+              </section>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <div class="sidebar-backdrop" id="sidebar-backdrop" hidden></div>
+    <noscript><p class="noscript-message">This dashboard needs JavaScript enabled to submit analytics questions.</p></noscript>
+  </body>
+</html>

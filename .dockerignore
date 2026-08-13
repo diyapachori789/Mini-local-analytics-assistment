@@ -1,0 +1,49 @@
+# Keep secrets, local state and generated artefacts out of the build context.
+# Anything listed here never reaches an image layer.
+
+# Secrets - the key is injected at runtime through Compose env_file instead.
+.env
+.env.*
+
+# Local virtual environment (Windows binaries, useless and large in a container)
+.venv/
+venv/
+
+# Python caches and test artefacts
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# Local databases. The container keeps its own under docker-data/, which is
+# bind-mounted at runtime, so these must not be baked into the image.
+*.duckdb
+*.duckdb.wal
+docker-data/
+
+# Runtime output, bind-mounted at runtime
+logs/
+charts/
+
+# Version control and editor state
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# Docker's own files do not belong in the context
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Developer-only tooling and docs not needed at runtime
+requirements-dev.txt
+open-duckdb-ui.ps1
+TESTING.md
+
+# NOTE: data/ is deliberately NOT ignored.
+# data/sample_opportunities.csv is required at runtime to build the
+# opportunities table, and tests/ is excluded only because the runtime image
+# does not run them - the local .venv workflow still does.
+tests/

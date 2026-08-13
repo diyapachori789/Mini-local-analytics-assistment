@@ -1,0 +1,24 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+*.sqlite
+*.db
+*.duckdb
+*.duckdb.wal
+.env
+.DS_Store
+.idea/
+.vscode/
+*.log
+logs/
+
+# Python packaging artifacts
+*.egg-info/
+build/
+dist/
+
+# Docker container databases (separate from the local ones)
+docker-data/

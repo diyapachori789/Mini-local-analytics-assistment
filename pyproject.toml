@@ -1,0 +1,33 @@
+[project]
+name = "mini-local-analytics"
+version = "0.1.0"
+description = "Tiny SQL metrics engine for synthetic Salesforce opportunity data."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "duckdb>=1.5.5",
+    "groq>=1.6.0",
+    "matplotlib>=3.11.1",
+    "pandas>=3.0.5",
+    "python-dotenv>=1.2.2",
+    "Flask>=3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["setuptools>=65.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Live tests call the Groq API and cost quota, so they are opt-in.
+# Run everything offline:  pytest
+# Run the generation suite: pytest -m live
+addopts = "-m 'not live' --strict-markers"
+markers = [
+    "live: hits the Groq API; requires GROQ_API_KEY and consumes quota",
+]

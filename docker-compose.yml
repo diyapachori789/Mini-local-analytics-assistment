@@ -1,0 +1,53 @@
+# Mini Local Analytics Assistant - single local container.
+#
+# DuckDB is an embedded, file-based engine: exactly one process may hold a
+# database file at a time. This stack therefore runs ONE instance. Do not add
+# replicas or start a second container against the same volumes, and do not run
+# the local CLI against the same files while this is up.
+
+services:
+  web:
+    build: .
+    image: mini-local-analytics:latest
+    container_name: mini-local-analytics
+
+    # Supplies GROQ_API_KEY (and any optional overrides) at runtime.
+    # Nothing from this file is baked into an image layer.
+    env_file:
+      - .env
+
+    environment:
+      # A container must bind all interfaces to receive its published port.
+      # The host side below still restricts reachability to loopback.
+      WEB_HOST: "0.0.0.0"
+      WEB_PORT: "8000"
+      # DuckDB keeps its database and write-ahead log together in this
+      # bind-mounted directory, so both survive container recreation.
+      DATA_HOME: "/app/docker-data"
+
+    ports:
+      # Bound to 127.0.0.1 on the host: reachable from this machine only,
+      # never from the local network.
+      - "127.0.0.1:8000:8000"
+
+    volumes:
+      # Databases (analytics.duckdb + history.duckdb and their .wal files).
+      # A directory, not individual files: a single-file bind mount would leave
+      # the write-ahead log inside the container and lose it on recreation.
+      - ./docker-data:/app/docker-data
+      # Generated PNGs, shared with the local project so both modes see them.
+      - ./charts:/app/charts
+      # Rotating logs, readable from the host while the container runs.
+      - ./logs:/app/logs
+      # Source dataset. Read-only: the app only ever reads this CSV.
+      - ./data:/app/data:ro
+
+    restart: unless-stopped
+
+    healthcheck:
+      # /api/status performs no query and no model call, so this costs nothing.
+      test: ["CMD", "python", "-c", "import os,sys,urllib.request; port=os.getenv('WEB_PORT','8000'); sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{port}/api/status', timeout=4).status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
