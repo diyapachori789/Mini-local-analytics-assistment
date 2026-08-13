@@ -161,23 +161,53 @@ jobs:
             echo "::error::EC2_SSH_KEY is not a readable private key. Paste the whole .pem, including the BEGIN and END lines."
             exit 1
           fi
+          if [ -z "$EC2_HOST" ]; then
+            echo "::error::EC2_HOST secret is empty. Set it to the instance's public IPv4."
+            exit 1
+          fi
+
           if [ -n "$KNOWN_HOSTS" ]; then
             # Pinned host key: proves the box is the one you deployed to before.
             printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           else
             # Trust on first use. Fine to start with; see DEPLOYMENT.md for how
             # to pin it, which is what stops a swapped host from being trusted.
-            ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+            # stderr is deliberately NOT discarded: when this fails silently the
+            # next step dies with "Host key verification failed", which points
+            # at SSH rather than at the reason, and the reason is nearly always
+            # a security group that does not admit the runner.
+            ssh-keyscan -T 15 -H "$EC2_HOST" >> ~/.ssh/known_hosts || true
           fi
           chmod 600 ~/.ssh/known_hosts
+
+          # An empty known_hosts is the actual failure. Say so here, where the
+          # cause is still obvious, instead of letting ssh report a symptom.
+          if ! grep -q . ~/.ssh/known_hosts; then
+            echo "::error::Could not read the host key of ${EC2_HOST}:22 from this runner."
+            echo "This runner is a GitHub-hosted machine in Azure, not your laptop, so a"
+            echo "security group rule scoped to 'My IP' will not admit it."
+            echo "Fix: EC2 > Security groups > Edit inbound rules > SSH (22)"
+            echo "     source 0.0.0.0/0 (key-only auth is on by default on Amazon Linux),"
+            echo "     or use AWS SSM Session Manager to avoid opening 22 at all."
+            echo "Also confirm the instance is running and EC2_HOST matches its current"
+            echo "public IPv4 - that address changes after every stop/start unless you"
+            echo "attach an Elastic IP."
+            exit 1
+          fi
+          echo "Host key retrieved for ${EC2_HOST}."
 
       - name: Copy the compose file and deploy script
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
         run: |
-          ssh -i ~/.ssh/deploy.pem "$EC2_USER@$EC2_HOST" 'mkdir -p ~/mini-local-analytics'
-          scp -i ~/.ssh/deploy.pem docker-compose.prod.yml scripts/deploy.sh \
+          # BatchMode stops ssh waiting on a prompt no one can answer, and the
+          # timeout turns an unreachable host into a fast, legible failure
+          # instead of a job that hangs until it is cancelled.
+          ssh -i ~/.ssh/deploy.pem -o BatchMode=yes -o ConnectTimeout=15 \
+            "$EC2_USER@$EC2_HOST" 'mkdir -p ~/mini-local-analytics'
+          scp -i ~/.ssh/deploy.pem -o BatchMode=yes -o ConnectTimeout=15 \
+            docker-compose.prod.yml scripts/deploy.sh \
             "$EC2_USER@$EC2_HOST:~/mini-local-analytics/"
 
       - name: Write the runtime environment file
@@ -192,7 +222,8 @@ jobs:
           {
             printf 'GROQ_API_KEY=%s\n' "$GROQ_API_KEY"
             printf 'APP_IMAGE=%s\n' "$APP_IMAGE"
-          } | ssh -i ~/.ssh/deploy.pem "$EC2_USER@$EC2_HOST" \
+          } | ssh -i ~/.ssh/deploy.pem -o BatchMode=yes -o ConnectTimeout=15 \
+              "$EC2_USER@$EC2_HOST" \
               'umask 077 && cat > ~/mini-local-analytics/.env && echo "wrote .env ($(wc -l < ~/mini-local-analytics/.env) lines)"'
 
       - name: Deploy
@@ -208,7 +239,7 @@ jobs:
           # registry token. Piping the script in instead would collide: the
           # docker login would eat the rest of it.
           printf '%s\n' "$REGISTRY_TOKEN" | ssh -i ~/.ssh/deploy.pem \
-            "$EC2_USER@$EC2_HOST" \
+            -o BatchMode=yes -o ConnectTimeout=15 "$EC2_USER@$EC2_HOST" \
             "REGISTRY_USER='$REGISTRY_USER' bash ~/mini-local-analytics/deploy.sh"
 
       - name: Summarise the deployment

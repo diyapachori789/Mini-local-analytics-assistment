@@ -85,19 +85,37 @@ locking you out of your own instance with no way back in short of a reboot.
 
 `EC2 → Instances → your instance → Security → Security groups → Edit inbound rules`
 
-| Type | Port | Source |
-|---|---|---|
-| SSH | 22 | **My IP** |
-| Custom TCP | 8000 | **My IP** |
+| Type | Port | Source | Why |
+|---|---|---|---|
+| SSH | 22 | `0.0.0.0/0` | The deploy runs from a **GitHub-hosted runner in Azure**, not from your machine. |
+| Custom TCP | 8000 | **My IP** | Only you need to open the app. |
 
-> **This application has no login of its own.** Anyone who can reach port 8000
-> can run queries against your data and spend your Groq quota. The security
-> group is the only thing preventing that, so do not set the source to
-> `0.0.0.0/0`. If you need to share it more widely, put it behind a reverse
-> proxy that authenticates first.
+**Port 22 cannot be scoped to "My IP".** That was the cause of
+`Host key verification failed` on the first deploy attempt: `ssh-keyscan` on the
+runner could not reach the instance, so the host key was never learned. GitHub's
+runners use dynamic Azure addresses, and while GitHub publishes its ranges at
+`https://api.github.com/meta`, there are thousands of them and a security group
+allows 60 rules by default — so pinning them is not practical.
 
-Note that "My IP" is your current address. On a home connection it changes, and
-the app stops being reachable until you update the rule.
+Opening 22 to the world is less alarming than it sounds *provided* password
+authentication stays off, which is the default on Amazon Linux 2023: only your
+`.pem` gets in. Confirm it with:
+
+```bash
+sudo sshd -T | grep -E 'passwordauthentication|permitrootlogin'
+# want: passwordauthentication no
+```
+
+If you would rather not expose 22 at all, the clean answer is **AWS SSM Session
+Manager**: attach an instance profile with `AmazonSSMManagedInstanceCore`, give
+the workflow AWS credentials via OIDC, and replace the ssh steps with
+`aws ssm send-command`. No inbound rule at all. That is the right production
+posture and a reasonable next step once this pipeline is working.
+
+> **Port 8000 is different — keep it scoped to your IP.** This application has
+> no login of its own, so anyone who can reach it can query your data and spend
+> your Groq quota. "My IP" is your current address; on a home connection it
+> changes, and the app stops being reachable until you update the rule.
 
 ---
 
@@ -230,7 +248,9 @@ the value into `env:` at step level as this workflow does.
 
 | Symptom | Cause |
 |---|---|
+| `Host key verification failed` | Port 22 is not open to the runner. The security group's SSH rule must be `0.0.0.0/0`, not "My IP" — see §3. Also check the instance is running and `EC2_HOST` matches its **current** public IP. |
 | `Permission denied (publickey)` | `EC2_SSH_KEY` is truncated or has Windows line endings, or `EC2_USER` is wrong. |
+| `Connection timed out` after 15s | Instance stopped, wrong IP, or no inbound rule on 22 at all. |
 | `denied` when pulling from ghcr.io | Package is private and `GHCR_PAT` is missing or lacks `read:packages`. Or make the package public: `Packages → Package settings → Change visibility`. |
 | Deploy succeeds, browser times out | Security group has no inbound rule for 8000 from your IP. |
 | `required variable APP_IMAGE is missing` | `.env` was not written — the deploy step before it failed. |
