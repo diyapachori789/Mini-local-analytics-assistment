@@ -1,0 +1,75 @@
+# Mini Local Analytics Assistant - server deployment.
+#
+# Deliberately standalone rather than an override of docker-compose.yml. An
+# override would inherit `build: .`, which needs the source tree on the server;
+# this file needs only itself and a .env, because CI has already built and
+# published the image.
+#
+# Run with:  docker compose -f docker-compose.prod.yml up -d
+#
+# DuckDB is embedded and single-writer: exactly one process may hold a database
+# file. One container, no replicas, and the deploy stops the old one before
+# starting the new one.
+
+services:
+  web:
+    # Set by CI to an immutable digest-pinned tag. Never :latest in production -
+    # a restart weeks later must run the same code that was tested.
+    image: ${APP_IMAGE:?APP_IMAGE must be set (CI writes it into .env)}
+    container_name: mini-local-analytics
+
+    # Supplies GROQ_API_KEY and APP_IMAGE. Written by the deploy job with
+    # umask 077, never committed, never baked into a layer.
+    env_file:
+      - .env
+
+    environment:
+      # Bind all interfaces inside the container so the published port works.
+      WEB_HOST: "0.0.0.0"
+      WEB_PORT: "8000"
+      DATA_HOME: "/app/docker-data"
+
+    ports:
+      # Published on every interface, unlike the local compose file which binds
+      # loopback only. The EC2 security group is what limits who can reach it,
+      # so that rule is load-bearing: this app has no authentication of its own.
+      - "8000:8000"
+
+    volumes:
+      # Named volumes, NOT bind mounts. The container runs as uid 10001, while a
+      # host directory would be owned by ec2-user (uid 1000), so a bind mount
+      # gives the app a read-only home and it cannot write its database. Docker
+      # seeds a fresh named volume from the image, inheriting the right owner.
+      #
+      # The database and its write-ahead log live together in one volume; DuckDB
+      # writes the .wal beside the file and needs both to survive a restart.
+      - duckdb-data:/app/docker-data
+      - charts:/app/charts
+      - logs:/app/logs
+      # data/ is deliberately not mounted: the CSV is baked into the image, and
+      # an empty host directory here would shadow it and leave no dataset.
+
+    restart: unless-stopped
+
+    # t2.micro has 1 GB and no swap. A cap means a runaway container is killed
+    # on its own instead of taking sshd down with it.
+    mem_limit: 768m
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,sys,urllib.request; port=os.getenv('WEB_PORT','8000'); sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{port}/api/status', timeout=4).status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+    logging:
+      # Without this, container logs grow until the 8 GB root volume is full.
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  duckdb-data:
+  charts:
+  logs:
