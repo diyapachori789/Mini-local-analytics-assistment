@@ -33,7 +33,7 @@ services:
       # Published on every interface, unlike the local compose file which binds
       # loopback only. The EC2 security group is what limits who can reach it,
       # so that rule is load-bearing: this app has no authentication of its own.
-      - "8000:8000"
+      - "80:8000"
 
     volumes:
       # Named volumes, NOT bind mounts. The container runs as uid 10001, while a
