@@ -16,18 +16,44 @@ REGISTRY="${REGISTRY:-ghcr.io}"
 cd "$APP_DIR"
 
 # The token arrives on stdin, so it never appears in a command line where any
-# other user on the box could read it out of `ps`.
-docker login "$REGISTRY" -u "${REGISTRY_USER:?REGISTRY_USER is required}" --password-stdin
+# other user on the box could read it out of `ps`. Held in a shell variable
+# rather than piped straight through, because whether to log in at all is a
+# decision that has to be made first.
+REGISTRY_TOKEN="$(cat)"
 
 cleanup() { docker logout "$REGISTRY" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
+
+# A public package pulls anonymously, so a failed login is not a failed deploy.
+# Treating it as fatal meant a token without the packages scope stopped a pull
+# that needed no token in the first place.
+if [ -n "$REGISTRY_TOKEN" ]; then
+  if printf '%s\n' "$REGISTRY_TOKEN" \
+      | docker login "$REGISTRY" -u "${REGISTRY_USER:?REGISTRY_USER is required}" --password-stdin
+  then
+    echo "Authenticated to $REGISTRY."
+  else
+    echo "Registry login was refused; continuing anonymously."
+    echo "That is fine for a public package. If the pull below fails, the"
+    echo "package is private and needs a GHCR_PAT secret with read:packages."
+  fi
+else
+  echo "No registry token supplied; pulling anonymously."
+fi
+unset REGISTRY_TOKEN
 
 # What is running right now, so a failed rollout has somewhere to go back to.
 PREVIOUS=$(docker inspect --format '{{.Image}}' "$CONTAINER" 2>/dev/null || true)
 echo "Currently running: ${PREVIOUS:-nothing}"
 
 echo "Pulling the new image..."
-docker compose -f "$COMPOSE_FILE" pull
+if ! docker compose -f "$COMPOSE_FILE" pull; then
+  echo "::error::Could not pull the image."
+  echo "If the GHCR package is private, either make it public"
+  echo "(GitHub > Packages > package settings > Change visibility), or add a"
+  echo "GHCR_PAT repository secret holding a token with read:packages."
+  exit 1
+fi
 
 # Stop before start, never both at once. DuckDB is embedded and single-writer:
 # two processes holding one database file is precisely what it forbids. That

@@ -135,6 +135,12 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      # Without this the job's GITHUB_TOKEN carries no package scope, and the
+      # registry rejects it. Harmless for a public package, which needs no
+      # token at all, and required the moment the package is made private.
+      packages: read
     # Optional: create an Environment named `production` in repo settings to
     # require a manual approval before this job runs.
     #
