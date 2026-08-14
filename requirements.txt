@@ -4,3 +4,4 @@ matplotlib>=3.11.1
 pandas>=3.0.5
 python-dotenv>=1.2.2
 Flask>=3.0
+waitress>=3.0

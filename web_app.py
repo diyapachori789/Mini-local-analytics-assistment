@@ -57,6 +57,10 @@ MAX_WEB_QUESTION_CHARS = 2000
 # WEB_HOST / WEB_PORT so a container can bind 0.0.0.0 without changing local use.
 SERVER_HOST = WEB_HOST
 SERVER_PORT = WEB_PORT
+# Small on purpose: DuckDB serialises behind one lock, so extra threads buy
+# nothing for queries. They exist so a slow or idle client cannot stop the
+# server answering everyone else.
+SERVER_THREADS = 4
 _CHART_FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*\.png$", re.IGNORECASE)
 _CSP = (
     "default-src 'self'; "
@@ -497,6 +501,47 @@ def create_app(
     return app
 
 
+def serve_forever(app: Flask) -> None:
+    """Run the application on a server that a stalled connection cannot wedge.
+
+    Werkzeug's development server sets no socket timeout, so a client that
+    opens a connection and never sends a request line blocks the handler
+    indefinitely. With ``threaded=False`` that blocked one handler *and* every
+    other request behind it: the port kept accepting connections while nothing
+    was ever answered. On a public address that is not hypothetical - port
+    scanners do exactly this, continuously - and it took the app down within
+    minutes of being exposed.
+
+    Waitress reads requests through a select loop rather than a thread per
+    connection, so an idle client costs no worker at all, and ``channel_timeout``
+    closes it rather than waiting forever. Falling back to the development
+    server keeps this importable if waitress is not installed, which only
+    affects local use.
+    """
+    try:
+        from waitress import serve
+    except ImportError:
+        logger.warning(
+            "waitress is not installed; using the development server, which a "
+            "stalled connection can block. Do not expose this to a network."
+        )
+        app.run(host=SERVER_HOST, port=SERVER_PORT, debug=False, threaded=True)
+        return
+
+    logger.info("Serving with waitress (threads=%s).", SERVER_THREADS)
+    serve(
+        app,
+        host=SERVER_HOST,
+        port=SERVER_PORT,
+        threads=SERVER_THREADS,
+        # Reap a client that connects and then says nothing. This is the
+        # setting that makes the app survive being on the open internet.
+        channel_timeout=30,
+        # The app is the only thing on this port; no proxy sets these headers.
+        ident=None,
+    )
+
+
 def main() -> int:
     """Initialize the local database once and start a loopback-only server."""
     setup_logging()
@@ -526,7 +571,7 @@ def main() -> int:
     print("Press Ctrl+C to stop the server.", flush=True)
 
     try:
-        app.run(host=SERVER_HOST, port=SERVER_PORT, debug=False, threaded=False)
+        serve_forever(app)
     except KeyboardInterrupt:
         logger.info("Web application stopped by the user.")
     finally:

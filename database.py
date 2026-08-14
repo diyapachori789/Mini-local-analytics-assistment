@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -56,6 +57,14 @@ def _validate_csv_path(csv_path: Path) -> None:
 
 # Active DuckDB connection for the module lifecycle.
 _connection: Optional[duckdb.DuckDBPyConnection] = None
+
+# One DuckDB connection is shared by the whole process, and a DuckDB connection
+# is not safe to use from two threads at once. The web server used to be single
+# threaded, which made that true by accident; it no longer is, so the invariant
+# is stated here rather than depending on how the server happens to be
+# configured. Held only around the database call itself, never around a model
+# request, so a slow answer cannot block another user's query.
+_connection_lock = threading.Lock()
 
 
 def _get_connection() -> duckdb.DuckDBPyConnection:
@@ -203,16 +212,20 @@ def run_query(sql: str, max_rows: Optional[int] = MAX_RESULT_ROWS) -> QueryResul
     logger.info("SQL execution started (max_rows=%s).", max_rows)
 
     try:
-        result = conn.execute(safe_sql)
-        if max_rows is None:
-            frame = result.df()
-            truncated = False
-        else:
-            # One row beyond the cap is fetched purely to detect truncation.
-            rows = result.fetchmany(max_rows + 1)
-            truncated = len(rows) > max_rows
-            columns = [description[0] for description in result.description]
-            frame = pd.DataFrame(rows[:max_rows], columns=columns)
+        # The cursor and its pending rows belong to the connection, so fetching
+        # has to stay inside the lock: releasing it after execute() would let a
+        # second thread run a query and invalidate the result being read here.
+        with _connection_lock:
+            result = conn.execute(safe_sql)
+            if max_rows is None:
+                frame = result.df()
+                truncated = False
+            else:
+                # One row beyond the cap is fetched purely to detect truncation.
+                rows = result.fetchmany(max_rows + 1)
+                truncated = len(rows) > max_rows
+                columns = [description[0] for description in result.description]
+                frame = pd.DataFrame(rows[:max_rows], columns=columns)
     except Exception as exc:
         logger.error("SQL execution failed: %s", exc)
         raise SqlExecutionError(f"Failed to execute SQL: {exc}") from exc
@@ -256,7 +269,8 @@ def get_schema() -> str:
     )
 
     try:
-        result = conn.execute(schema_query, [TABLE_NAME, TABLE_SCHEMA]).fetchall()
+        with _connection_lock:
+            result = conn.execute(schema_query, [TABLE_NAME, TABLE_SCHEMA]).fetchall()
     except Exception as exc:
         logger.error("Unable to retrieve schema for table '%s': %s", TABLE_NAME, exc)
         raise DatabaseError(
