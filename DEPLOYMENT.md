@@ -248,7 +248,8 @@ the value into `env:` at step level as this workflow does.
 
 | Symptom | Cause |
 |---|---|
-| `Host key verification failed` | Port 22 is not open to the runner. The security group's SSH rule must be `0.0.0.0/0`, not "My IP" — see §3. Also check the instance is running and `EC2_HOST` matches its **current** public IP. |
+| `Host key verification failed` | Almost always a stale `EC2_KNOWN_HOSTS`: it holds a key for an IP the instance no longer has. **Delete the secret** — the workflow then trusts the host on first connection. Repin later with `ssh-keyscan -H <ip>`. The workflow now checks for this and fails with a named error instead. |
+| `Cannot reach <ip>:22` | Port 22 is not open to the runner. The security group's SSH rule must be `0.0.0.0/0`, not "My IP" — see §3. Also check the instance is running and `EC2_HOST` matches its **current** public IP. |
 | `Permission denied (publickey)` | `EC2_SSH_KEY` is truncated or has Windows line endings, or `EC2_USER` is wrong. |
 | `Connection timed out` after 15s | Instance stopped, wrong IP, or no inbound rule on 22 at all. |
 | `denied` when pulling from ghcr.io | Package is private and `GHCR_PAT` is missing or lacks `read:packages`. Or make the package public: `Packages → Package settings → Change visibility`. |

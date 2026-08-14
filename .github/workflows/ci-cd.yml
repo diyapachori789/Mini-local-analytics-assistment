@@ -166,35 +166,53 @@ jobs:
             exit 1
           fi
 
-          if [ -n "$KNOWN_HOSTS" ]; then
-            # Pinned host key: proves the box is the one you deployed to before.
-            printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
-          else
-            # Trust on first use. Fine to start with; see DEPLOYMENT.md for how
-            # to pin it, which is what stops a swapped host from being trusted.
-            # stderr is deliberately NOT discarded: when this fails silently the
-            # next step dies with "Host key verification failed", which points
-            # at SSH rather than at the reason, and the reason is nearly always
-            # a security group that does not admit the runner.
-            ssh-keyscan -T 15 -H "$EC2_HOST" >> ~/.ssh/known_hosts || true
-          fi
-          chmod 600 ~/.ssh/known_hosts
-
-          # An empty known_hosts is the actual failure. Say so here, where the
-          # cause is still obvious, instead of letting ssh report a symptom.
-          if ! grep -q . ~/.ssh/known_hosts; then
-            echo "::error::Could not read the host key of ${EC2_HOST}:22 from this runner."
+          # Is the port even reachable? Asked first because every other failure
+          # here looks the same from SSH, and this one has a specific fix.
+          if ! timeout 12 bash -c "cat < /dev/null > /dev/tcp/${EC2_HOST}/22" 2>/dev/null; then
+            echo "::error::Cannot reach ${EC2_HOST}:22 from this runner."
             echo "This runner is a GitHub-hosted machine in Azure, not your laptop, so a"
             echo "security group rule scoped to 'My IP' will not admit it."
             echo "Fix: EC2 > Security groups > Edit inbound rules > SSH (22)"
             echo "     source 0.0.0.0/0 (key-only auth is on by default on Amazon Linux),"
             echo "     or use AWS SSM Session Manager to avoid opening 22 at all."
-            echo "Also confirm the instance is running and EC2_HOST matches its current"
+            echo "Also confirm the instance is running and EC2_HOST matches its CURRENT"
             echo "public IPv4 - that address changes after every stop/start unless you"
             echo "attach an Elastic IP."
             exit 1
           fi
-          echo "Host key retrieved for ${EC2_HOST}."
+          echo "${EC2_HOST}:22 is reachable."
+
+          if [ -n "$KNOWN_HOSTS" ]; then
+            # Pinned host key: proves the box is the one you deployed to before.
+            printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+            chmod 600 ~/.ssh/known_hosts
+            # Non-empty is not the same as "contains a key for THIS host", and
+            # only the second one makes ssh work. Checking the weaker property
+            # is what let a stale pin through to an instant, unexplained
+            # "Host key verification failed" in the next step.
+            if ! ssh-keygen -F "$EC2_HOST" -f ~/.ssh/known_hosts >/dev/null 2>&1; then
+              echo "::error::EC2_KNOWN_HOSTS has no entry for ${EC2_HOST}."
+              echo "It is probably pinned to an older IP. Either delete the secret to"
+              echo "fall back to trust-on-first-use, or regenerate it with:"
+              echo "  ssh-keyscan -H ${EC2_HOST}"
+              exit 1
+            fi
+            echo "SSH_STRICT=yes" >> "$GITHUB_ENV"
+            echo "Using the pinned host key."
+          else
+            # Trust on first use, performed by ssh itself. Deliberately not
+            # ssh-keyscan: that put a second, separately-failing step between
+            # us and the connection, and when it half-succeeded the error
+            # surfaced later and pointed at the wrong thing. accept-new is the
+            # same trust decision made in one place, by the client that
+            # actually needs it.
+            : > ~/.ssh/known_hosts
+            chmod 600 ~/.ssh/known_hosts
+            echo "SSH_STRICT=accept-new" >> "$GITHUB_ENV"
+            echo "No pinned host key; accepting this host on first connection."
+            echo "To pin it, run 'ssh-keyscan -H ${EC2_HOST}' and store the output"
+            echo "as the EC2_KNOWN_HOSTS secret."
+          fi
 
       - name: Copy the compose file and deploy script
         env:
@@ -204,9 +222,9 @@ jobs:
           # BatchMode stops ssh waiting on a prompt no one can answer, and the
           # timeout turns an unreachable host into a fast, legible failure
           # instead of a job that hangs until it is cancelled.
-          ssh -i ~/.ssh/deploy.pem -o BatchMode=yes -o ConnectTimeout=15 \
+          ssh -i ~/.ssh/deploy.pem -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking="${SSH_STRICT:-accept-new}" \
             "$EC2_USER@$EC2_HOST" 'mkdir -p ~/mini-local-analytics'
-          scp -i ~/.ssh/deploy.pem -o BatchMode=yes -o ConnectTimeout=15 \
+          scp -i ~/.ssh/deploy.pem -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking="${SSH_STRICT:-accept-new}" \
             docker-compose.prod.yml scripts/deploy.sh \
             "$EC2_USER@$EC2_HOST:~/mini-local-analytics/"
 
@@ -222,7 +240,7 @@ jobs:
           {
             printf 'GROQ_API_KEY=%s\n' "$GROQ_API_KEY"
             printf 'APP_IMAGE=%s\n' "$APP_IMAGE"
-          } | ssh -i ~/.ssh/deploy.pem -o BatchMode=yes -o ConnectTimeout=15 \
+          } | ssh -i ~/.ssh/deploy.pem -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking="${SSH_STRICT:-accept-new}" \
               "$EC2_USER@$EC2_HOST" \
               'umask 077 && cat > ~/mini-local-analytics/.env && echo "wrote .env ($(wc -l < ~/mini-local-analytics/.env) lines)"'
 
@@ -239,7 +257,7 @@ jobs:
           # registry token. Piping the script in instead would collide: the
           # docker login would eat the rest of it.
           printf '%s\n' "$REGISTRY_TOKEN" | ssh -i ~/.ssh/deploy.pem \
-            -o BatchMode=yes -o ConnectTimeout=15 "$EC2_USER@$EC2_HOST" \
+            -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking="${SSH_STRICT:-accept-new}" "$EC2_USER@$EC2_HOST" \
             "REGISTRY_USER='$REGISTRY_USER' bash ~/mini-local-analytics/deploy.sh"
 
       - name: Summarise the deployment
