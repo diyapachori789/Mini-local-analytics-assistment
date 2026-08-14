@@ -259,22 +259,40 @@ jobs:
           # Falls back to the job token, which works for a public package.
           REGISTRY_TOKEN: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
         run: |
+          # tee lets the log stream live AND be read back afterwards. pipefail
+          # is required with it: without it the pipeline reports tee's exit
+          # status, so a failed deploy would be recorded as a success.
+          set -o pipefail
+
           # The script is already on the server, so stdin is free to carry the
           # registry token. Piping the script in instead would collide: the
           # docker login would eat the rest of it.
           printf '%s\n' "$REGISTRY_TOKEN" | ssh -i ~/.ssh/deploy.pem \
             -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking="${SSH_STRICT:-accept-new}" "$EC2_USER@$EC2_HOST" \
-            "REGISTRY_USER='$REGISTRY_USER' bash ~/mini-local-analytics/deploy.sh"
+            "REGISTRY_USER='$REGISTRY_USER' bash ~/mini-local-analytics/deploy.sh" \
+            | tee /tmp/deploy.log
+
+          # The server knows which port it actually published; the runner does
+          # not. Reading it back keeps the summary link honest when the compose
+          # file changes.
+          PORT=$(grep -oE 'DEPLOYED_PORT=[0-9]+' /tmp/deploy.log | tail -1 | cut -d= -f2)
+          echo "DEPLOYED_PORT=${PORT:-8000}" >> "$GITHUB_ENV"
 
       - name: Summarise the deployment
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           APP_IMAGE: ${{ needs.build.outputs.image }}
         run: |
+          # Port 80 is the default for http, so showing it would be noise.
+          if [ "${DEPLOYED_PORT}" = "80" ]; then
+            URL="http://${EC2_HOST}"
+          else
+            URL="http://${EC2_HOST}:${DEPLOYED_PORT}"
+          fi
           {
             echo "### Deployed"
             echo ""
-            echo "- URL: http://${EC2_HOST}:8000"
+            echo "- URL: ${URL}"
             echo "- Image: \`${APP_IMAGE}\`"
             echo "- Commit: \`${GITHUB_SHA}\`"
           } >> "$GITHUB_STEP_SUMMARY"

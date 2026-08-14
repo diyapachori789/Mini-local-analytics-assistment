@@ -85,8 +85,25 @@ fi
 # Independent of the healthcheck, which runs inside the container: this proves
 # the published port works too, so a broken port mapping fails the deploy
 # instead of being discovered by a user.
-curl -fsS --max-time 10 http://127.0.0.1:8000/api/status > /dev/null
-echo "Deployed and healthy."
+#
+# The port is read back from Docker rather than assumed. Hard-coding 8000 here
+# meant that changing the compose file to publish on 80 deployed correctly and
+# then failed its own verification, which is a confusing way to be told the
+# check is stale rather than the deploy.
+PUBLISHED=$(docker compose -f "$COMPOSE_FILE" port web 8000 2>/dev/null | tail -1)
+HOST_PORT="${PUBLISHED##*:}"
+HOST_PORT="${HOST_PORT:-8000}"
+
+if ! curl -fsS --max-time 10 "http://127.0.0.1:${HOST_PORT}/api/status" > /dev/null; then
+  echo "::error::The container is healthy but nothing answers on host port ${HOST_PORT}."
+  echo "That points at the ports: mapping in $COMPOSE_FILE."
+  docker compose -f "$COMPOSE_FILE" ps || true
+  exit 1
+fi
+
+echo "Deployed and healthy on host port ${HOST_PORT}."
+# Read back by the workflow so the run summary links to the right address.
+echo "DEPLOYED_PORT=${HOST_PORT}"
 
 # The root volume is 8 GB and every deploy leaves a superseded image behind.
 docker image prune -af --filter "until=168h" >/dev/null 2>&1 || true
