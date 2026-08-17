@@ -307,7 +307,7 @@ class TestAnswerFallback:
 
 
 class TestChartIntegration:
-    """Charts appear only when asked for, and share the answer's QueryResult."""
+    """Useful/requested charts share the answer's authoritative QueryResult."""
 
     @pytest.fixture(autouse=True)
     def _stub_pipeline(self, monkeypatch):
@@ -321,14 +321,19 @@ class TestChartIntegration:
         )
         monkeypatch.setattr(app, "generate_answer", lambda q, r: "C. Mehta closed the most.")
 
-    def test_plain_question_generates_no_chart(
+    def test_scalar_question_generates_no_chart(
         self, initialized_database, monkeypatch, capsys
     ):
         def forbidden(*args, **kwargs):
-            raise AssertionError("no chart should be created for a plain question")
+            raise AssertionError("no chart should be created for a scalar result")
 
+        monkeypatch.setattr(
+            app,
+            "generate_plan",
+            lambda q: parse_plan("SELECT COUNT(*) AS opportunity_count FROM opportunities;"),
+        )
         monkeypatch.setattr(app, "create_chart", forbidden)
-        assert app.answer_question("How many opportunities did each owner close won?") is True
+        assert app.answer_question("How many opportunities are there?") is True
 
         output = capsys.readouterr().out
         assert "Answer:" in output

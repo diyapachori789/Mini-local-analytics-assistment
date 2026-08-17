@@ -100,12 +100,10 @@ _TEMPLATES: dict[RefusalCategory, tuple[str, ...]] = {
         "opportunity counts, owners, regions, stages, or performance.",
     ),
     RefusalCategory.NEEDS_CONTEXT: (
-        "I answer each question on its own, so I don't have the earlier one to "
-        "follow on from. Try asking it in full — for example name the region, "
-        "owner, account, or stage you have in mind.",
-        "I'd need a little more to go on, because I don't carry context between "
-        "questions. Ask the whole thing in one go and I can answer it, such as "
-        "“win rate for EMEA” rather than “what about EMEA?”",
+        "I'd need a little more detail to answer that safely. Try asking with the "
+        "region, owner, account, stage, or measure you have in mind.",
+        "I need a clearer business question for that request. For example, ask "
+        "“win rate for EMEA” rather than only “what about EMEA?”.",
     ),
     RefusalCategory.UNSUPPORTED: (
         "I couldn't treat that as a supported analytics question. Try something like "

@@ -69,6 +69,15 @@ def ask(client, question, **extra):
     return client.post("/api/query", json=payload)
 
 
+def load_saved_conversation(client, conversation_id: str) -> dict:
+    """Fetch the safe persisted transcript for a browser query."""
+    response = client.get(f"/api/conversations/{conversation_id}")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    return payload["conversation"]
+
+
 class TestRefusedResponseContract:
     @pytest.mark.parametrize(
         "question,expected",
@@ -113,6 +122,7 @@ class TestRefusedResponseContract:
         application = client_factory(refuse_generator)
         payload = ask(application.test_client(), "Show all tables", chart_requested=True).get_json()
 
+        assert payload["chart"]["requested"] is False
         assert payload["chart"]["url"] is None
         assert payload["chart"]["type"] is None
 
@@ -239,27 +249,34 @@ class TestNormalPathUnchanged:
         assert len(application.executions) == 1, "single-query invariant"
 
 
-class TestRefusalHistory:
+class TestRefusalConversation:
     def test_refused_question_is_persisted(self, client_factory):
         application = client_factory(refuse_generator)
-        ask(application.test_client(), "Show all tables")
+        client = application.test_client()
+        payload = ask(client, "Show all tables").get_json()
 
-        records = history_repository.list_history()
-        assert len(records) == 1
-        record = records[0]
-        assert record.original_question == "Show all tables"
-        assert record.refused is True
-        assert record.row_count is None or record.row_count == 0
-        assert record.chart_filename is None
-        assert record.answer in refusal._TEMPLATES[RefusalCategory.METADATA]
+        conversation = load_saved_conversation(client, payload["conversation_id"])
+        assert [message["role"] for message in conversation["messages"]] == ["user", "assistant"]
+        user, assistant = conversation["messages"]
+        assert user["content"] == "Show all tables"
+        assert assistant["meta"]["refused"] is True
+        assert assistant["row_count"] is None or assistant["row_count"] == 0
+        assert assistant["chart"]["url"] is None
+        assert assistant["content"] in refusal._TEMPLATES[RefusalCategory.METADATA]
+        # Browser turns are not duplicated into the retained legacy flat endpoint.
+        assert history_repository.list_history() == []
 
-    def test_history_stores_no_sql_for_a_refusal(self, client_factory):
+    def test_conversation_detail_stores_no_sql_for_a_refusal(self, client_factory):
         application = client_factory(refuse_generator)
-        ask(application.test_client(), "DROP TABLE opportunities")
+        client = application.test_client()
+        payload = ask(client, "DROP TABLE opportunities").get_json()
 
-        record = history_repository.list_history()[0]
-        assert not hasattr(record, "sql")
-        assert "DROP" not in repr(record).upper().replace("DROP TABLE OPPORTUNITIES", "")
+        assistant = load_saved_conversation(client, payload["conversation_id"])["messages"][-1]
+        rendered = str(assistant)
+        assert "sql" not in assistant
+        for leaked in ("private_generated_sql", "information_schema", "Traceback", "gsk_", "C:\\"):
+            assert leaked not in rendered
+        assert "DROP" not in assistant["content"].upper()
 
 
 class TestFrontendRefusalRendering:
@@ -268,11 +285,15 @@ class TestFrontendRefusalRendering:
         source = application.test_client().get("/static/js/app.js").get_data(as_text=True)
 
         assert "payload.refused === true" in source
-        assert "ASSISTANT RESPONSE" in source
-        # Refusals clear the table and chart rather than leaving stale output.
-        refused_block = source.split("if (refused) {")[1].split("}")[0]
-        assert "renderResultTable([], [])" in refused_block
-        assert "resetChart()" in refused_block
+        assert 'message.meta.refused ? "Assistant response" : "Analytics Assistant"' in source
+        # A refusal is an assistant message in the stream, with no data block to
+        # leave behind from a prior turn.
+        assert "ui.conversationStream" in source
+        data_block = source.split("function appendDataBlock")[1].split("function createDataToggle")[0]
+        assert "if (message.meta.refused || !message.meta.hasResult) {" in data_block
+        assert "return;" in data_block
+        assert "renderResultTable" not in source
+        assert "resetChart" not in source
 
     def test_client_uses_no_innerhtml(self, client_factory):
         application = client_factory(refuse_generator)

@@ -46,6 +46,19 @@ class Intent(str, Enum):
     #: the way it does. Usually still needs SQL, because current figures are the
     #: evidence the explanation is built on.
     DATA_EXPLANATION = "DATA_EXPLANATION"
+    #: A legitimate social or capability interaction that needs no analytics.
+    #: A schema-free answer stage supplies the brief assistant reply within the
+    #: existing two-call budget.
+    GENERAL_CONVERSATION = "GENERAL_CONVERSATION"
+    #: An ordinary question that is not about this dataset - general knowledge,
+    #: a joke, a definition from the wider world. Answered briefly and without
+    #: pretending to have data, because refusing every one of these made an
+    #: assistant that could not hold a conversation.
+    OUT_OF_DOMAIN = "OUT_OF_DOMAIN"
+    #: An analytics request whose grouping or measure is genuinely ambiguous.
+    #: Asking one short question back is more useful than guessing, and costs
+    #: no query.
+    CLARIFICATION = "CLARIFICATION"
     #: Depends on an earlier turn that this assistant cannot see.
     INSUFFICIENT_CONTEXT = "INSUFFICIENT_CONTEXT"
     #: Not about this dataset at all.
@@ -55,7 +68,21 @@ class Intent(str, Enum):
 
 
 #: Intents the assistant will actually answer. Everything else is refused.
-ANSWERABLE: tuple[Intent, ...] = (Intent.DATA_QUERY, Intent.DATA_EXPLANATION)
+ANSWERABLE: tuple[Intent, ...] = (
+    Intent.DATA_QUERY,
+    Intent.DATA_EXPLANATION,
+    Intent.GENERAL_CONVERSATION,
+    Intent.OUT_OF_DOMAIN,
+    Intent.CLARIFICATION,
+)
+
+#: Intents answered by the schema-free conversational stage rather than by data.
+#: They share one call slot, so adding them costs no extra request.
+CONVERSATIONAL: tuple[Intent, ...] = (
+    Intent.GENERAL_CONVERSATION,
+    Intent.OUT_OF_DOMAIN,
+    Intent.CLARIFICATION,
+)
 
 
 # Wording drifts between model versions and between prompts. Accepting the
@@ -73,6 +100,18 @@ _INTENT_ALIASES: dict[str, Intent] = {
     "conceptual": Intent.DATA_EXPLANATION,
     "explanation": Intent.DATA_EXPLANATION,
     "explain": Intent.DATA_EXPLANATION,
+    "general_conversation": Intent.GENERAL_CONVERSATION,
+    "meta_conversation": Intent.GENERAL_CONVERSATION,
+    "follow_up_conversation": Intent.GENERAL_CONVERSATION,
+    "out_of_domain": Intent.OUT_OF_DOMAIN,
+    "out_of_domain_conversation": Intent.OUT_OF_DOMAIN,
+    "general_knowledge": Intent.OUT_OF_DOMAIN,
+    "clarification": Intent.CLARIFICATION,
+    "clarify": Intent.CLARIFICATION,
+    "ambiguous": Intent.CLARIFICATION,
+    "conversation": Intent.GENERAL_CONVERSATION,
+    "conversational": Intent.GENERAL_CONVERSATION,
+    "small_talk": Intent.GENERAL_CONVERSATION,
     "insufficient_context": Intent.INSUFFICIENT_CONTEXT,
     "needs_context": Intent.INSUFFICIENT_CONTEXT,
     "missing_context": Intent.INSUFFICIENT_CONTEXT,
@@ -92,6 +131,46 @@ _INTENT_ALIASES: dict[str, Intent] = {
 # The outermost brace pair. Greedy on purpose: a model that adds a stray
 # sentence around the object still yields the whole object.
 _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
+
+_CONVERSATION_RESPONSE_MAX_CHARS = 1200
+_CONVERSATION_RESPONSE_NUMBER_RE = re.compile(r"\d")
+
+# A number as prose writes it.
+_CONVERSATION_NUMBER_RE = re.compile(r"(?<![A-Za-z0-9_-])\d[\d,]*(?:\.\d+)?(?![A-Za-z0-9_])")
+
+# Vocabulary that makes a number a claim about *this business*. A conversational
+# reply has no query result behind it, so "your win rate is 45%" would be an
+# invented fact; "there are 3 broad types of machine learning" is not about the
+# data at all. Blanket-rejecting every digit was the simpler rule and it made
+# ordinary questions unanswerable, so the distinction is drawn here instead.
+_BUSINESS_CLAIM_RE = re.compile(
+    r"\b(?:opportunit\w*|deal|deals|pipeline|revenue|amount|amounts|win\s*rate|"
+    r"won|lost|closed|stage|stages|owner|owners|account|accounts|region|regions|"
+    r"industry|industries|quarter|forecast|sales|customer|customers|"
+    r"conversion|average|total|totals|percent|percentage|%)\b",
+    re.IGNORECASE,
+)
+_CONVERSATION_RESPONSE_UNSAFE_RE = re.compile(
+    r"```|"
+    r"(?:^|\n)\s*(?:select|with|insert|update|delete|drop|alter|create|attach|"
+    r"detach|pragma)\b|"
+    r"\b(?:information_schema|duckdb_tables|sqlite_master|pg_catalog)\b|"
+    r"\b(?:database\s+schema|table\s+structure|column\s+names?|field\s+names?|"
+    r"data\s+types?|list\s+of\s+tables?)\b|"
+    r"\b(?:data_query|data_explanation|general_conversation|out_of_domain|"
+    r"clarification|insufficient_context|unsupported|unsafe)\b|"
+    r"\b(?:(?:[A-Za-z0-9]+_)?api[_ -]?key|access[_ -]?token|password|secret)\b|"
+    r"\bgsk_[A-Za-z0-9_-]{8,}\b|\bsk-[A-Za-z0-9_-]{8,}\b|"
+    r"\bbearer\s+[A-Za-z0-9._~+/=-]{6,}\b|"
+    # An address in a reply is either an identifier picked up from the
+    # surroundings or a name inferred from one. A social reply has no reason
+    # to contain one, and "greet them by the name in their email" is exactly
+    # the shortcut this assistant must not take.
+    r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|"
+    r"(?:[A-Za-z]:[\\/]|/(?:home|tmp|var|app|users|root|opt|usr|etc|mnt|srv|"
+    r"bin|lib|private)(?:/|\b))",
+    re.IGNORECASE,
+)
 
 
 # Asking for the shape of the database rather than the business data in it.
@@ -174,6 +253,156 @@ def _coerce_sql(value: object) -> Optional[str]:
     return cleaned
 
 
+def business_claim_numbers(text: object) -> list[str]:
+    """Numbers in prose that are being asserted as facts about this business.
+
+    A number counts when dataset vocabulary sits close to it. That keeps a
+    general-knowledge answer usable while still catching a figure invented
+    about the user's own pipeline, which is the case that actually matters:
+    the conversational stage has no query result behind it, so any such number
+    came from the model rather than from DuckDB.
+    """
+    if not isinstance(text, str):
+        return []
+    claims: list[str] = []
+    for match in _CONVERSATION_NUMBER_RE.finditer(text):
+        window = text[max(0, match.start() - 60) : match.end() + 60]
+        if _BUSINESS_CLAIM_RE.search(window):
+            claims.append(match.group(0))
+    return claims
+
+
+def safe_conversation_response(
+    value: object, *, grounded_numbers: "frozenset[str] | set[str] | tuple[str, ...]" = ()
+) -> Optional[str]:
+    """Return bounded plain prose that is safe to expose as a social reply.
+
+    A conversational reply crosses an explicit output boundary before it can
+    reach an adapter: SQL, internal route labels, credentials, and local paths
+    are rejected rather than displayed.
+
+    Figures about the business are rejected too, unless they already appear in
+    ``grounded_numbers`` - the numbers persisted earlier in this conversation,
+    which reached it from DuckDB. That is what lets the assistant recap "the
+    win rate we saw was 23.67%" without letting it invent one.
+    """
+    if not isinstance(value, str):
+        return None
+    response = " ".join(value.split()).strip()
+    if not response or _CONVERSATION_RESPONSE_UNSAFE_RE.search(response):
+        return None
+
+    # The same schema check the data-backed answers use. This stage is never
+    # given the schema, so a leak here could only come from the transcript, but
+    # applying one filter at every output boundary is what stops a gap opening
+    # between them - the pattern rules alone missed "the opportunity_id column".
+    if contains_schema_disclosure(response):
+        return None
+
+    allowed = {str(n).replace(",", "") for n in grounded_numbers}
+    for claim in business_claim_numbers(response):
+        if claim.replace(",", "") not in allowed:
+            return None
+    return response[:_CONVERSATION_RESPONSE_MAX_CHARS]
+
+
+def numbers_in_context(text: object) -> frozenset[str]:
+    """Figures already stated in this conversation, so a recap may repeat them.
+
+    Everything here was written by a previous turn that was itself grounded, so
+    quoting it back is reporting, not inventing.
+    """
+    if not isinstance(text, str):
+        return frozenset()
+    return frozenset(m.group(0).replace(",", "") for m in _CONVERSATION_NUMBER_RE.finditer(text))
+
+
+# Words that turn a business noun into an implementation detail. "amount" is
+# what a deal is worth; "the amount column" is how the table is built.
+_SCHEMA_VOCABULARY = (
+    r"column|field|attribute|property|table|schema|database|dataset\s+field"
+    r"|data\s*type|datatype|varchar|bigint|boolean|integer|numeric|timestamp"
+)
+
+# "the opportunity_id column", "the is_won field", "a boolean field called x".
+_IDENTIFIER_WITH_VOCABULARY = re.compile(
+    r"(?:\b(?:" + _SCHEMA_VOCABULARY + r")\b[^.]{0,40}?\b{ident}\b)"
+    r"|(?:\b{ident}\b[^.]{{0,40}}?\b(?:" + _SCHEMA_VOCABULARY + r")\b)",
+    re.IGNORECASE,
+)
+
+# A lower_snake_case word. Column names and query aliases look like this;
+# ordinary prose and this dataset's values never do.
+_SNAKE_CASE_TOKEN_RE = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b")
+
+# "the columns are a, b", "fields include x and y" - an enumeration is a
+# disclosure even when the names that follow are ordinary words.
+_SCHEMA_ENUMERATION_RE = re.compile(
+    r"\b(?:column|field|attribute|property)s?\b\s*"
+    r"(?:\w+\s+){0,3}?(?:are|is|include[sd]?|named|called|consist|comprise)\b",
+    re.IGNORECASE,
+)
+
+
+def _identifier_pattern(identifier: str) -> re.Pattern[str]:
+    """Build the 'identifier near schema vocabulary' matcher for one column."""
+    quoted = re.escape(identifier)
+    return re.compile(
+        _IDENTIFIER_WITH_VOCABULARY.pattern.replace("{ident}", quoted).replace(
+            "{{0,40}}", "{0,40}"
+        ),
+        re.IGNORECASE,
+    )
+
+
+def contains_schema_disclosure(
+    text: object, identifiers: "frozenset[str] | set[str] | tuple[str, ...]" = ()
+) -> bool:
+    """True when prose exposes the shape of the table rather than its data.
+
+    Three signals, chosen so that business language survives and
+    implementation language does not:
+
+    * A snake_case name that is a real column. Prose says "the account name";
+      only a description of the table says ``account_name``. That single
+      underscore is what separates the two, which is why this needs no list of
+      phrasings to keep up to date.
+    * A real column name sitting next to schema vocabulary - "the amount column",
+      "the is_won field". The bare word "amount" is business language and is
+      left alone; the same word introduced as a column is not.
+    * An enumeration such as "the columns are ..." or "fields include ...",
+      which discloses the shape whatever names follow.
+
+    ``identifiers`` comes from the live schema, so a column added later is
+    protected without touching this function.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return False
+
+    if _SCHEMA_ENUMERATION_RE.search(text):
+        return True
+
+    # Any snake_case token, whether or not it is a table column. Result aliases
+    # are invented per query - win_rate_pct, total_amount - so a list of real
+    # columns cannot cover them, and it was exactly such an alias that reached a
+    # user. No value in this dataset contains an underscore, and business prose
+    # does not write one, so the shape alone is the signal.
+    if _SNAKE_CASE_TOKEN_RE.search(text):
+        return True
+
+    lowered = text.lower()
+    for identifier in identifiers:
+        name = str(identifier).strip().lower()
+        if not name:
+            continue
+        # A compound identifier is never ordinary prose.
+        if "_" in name and re.search(rf"\b{re.escape(name)}\b", lowered):
+            return True
+        if _identifier_pattern(name).search(text):
+            return True
+    return False
+
+
 def _reconcile(intent: Intent, sql: Optional[str]) -> QueryPlan:
     """Apply the invariants that make a plan safe to act on.
 
@@ -181,6 +410,8 @@ def _reconcile(intent: Intent, sql: Optional[str]) -> QueryPlan:
     cannot smuggle a statement past the router. A DATA_QUERY without SQL cannot
     be executed, so it becomes a refusal rather than an empty success.
     """
+    if intent in CONVERSATIONAL:
+        return QueryPlan(intent=intent, sql=None)
     if intent not in ANSWERABLE:
         return QueryPlan(intent=intent, sql=None)
     if intent is Intent.DATA_QUERY and sql is None:

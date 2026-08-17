@@ -92,9 +92,10 @@ def close_connection() -> None:
 def _restrict_file_access(conn: duckdb.DuckDBPyConnection) -> None:
     """Disable DuckDB filesystem access once the dataset has been loaded.
 
-    This is a one-way latch. DuckDB refuses to re-enable external access while the
-    database is running, so no subsequently executed SQL can read arbitrary files
-    or write results out via COPY, even if SQL validation is bypassed.
+    When DuckDB accepts this setting, it is a one-way latch: external access cannot
+    be re-enabled while the database is running. Applying it is intentionally
+    best-effort, however; startup logs a warning and continues if DuckDB rejects
+    the setting, while the SQL validator and database revalidation still apply.
     """
     if not RESTRICT_FILE_ACCESS:
         return
@@ -253,6 +254,32 @@ def execute_query(sql: str, max_rows: Optional[int] = None) -> pd.DataFrame:
     unchanged; use :func:`run_query` when row count or truncation matters.
     """
     return run_query(sql, max_rows=max_rows).frame
+
+
+def column_identifiers() -> frozenset[str]:
+    """Return the table's column names, lower-cased.
+
+    Exposed so the output filters can recognise a real identifier instead of
+    keeping their own copy of the schema, which would silently stop protecting
+    any column added later. Returns names only - never types, DDL or values -
+    and is used to *reject* text, never to build it.
+
+    An unavailable database yields an empty set rather than raising: this
+    supports a safety check, and a check that crashes is worse than one that
+    falls back to the pattern rules that do not need the schema.
+    """
+    try:
+        conn = _get_connection()
+        with _connection_lock:
+            rows = conn.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = ? AND table_schema = ?",
+                [TABLE_NAME, TABLE_SCHEMA],
+            ).fetchall()
+    except Exception as exc:  # noqa: BLE001 - a filter must not fail closed here
+        logger.warning("Column identifiers unavailable for output filtering: %s", exc)
+        return frozenset()
+    return frozenset(str(row[0]).strip().lower() for row in rows if row and row[0])
 
 
 def get_schema() -> str:

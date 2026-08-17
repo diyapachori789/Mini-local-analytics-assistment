@@ -302,7 +302,10 @@ class TestTruncatedAnswer:
     """A half-finished sentence must not be presented as a complete answer."""
 
     def test_truncated_answer_is_flagged(self, fake_client):
-        fake_client("The totals are: Atlas 604551, Cobalt 335", finish_reason="length")
+        # Cut off after a complete figure. A reply severed mid-number holds a
+        # number the result does not contain, and is now replaced rather than
+        # flagged - showing "14206" for 1420697 would be worse than not showing it.
+        fake_client("The totals are: NA 1801861, LATAM", finish_reason="length")
         answer = llm.generate_answer("Totals per account?", GROUPED)
         assert "[Answer truncated" in answer
 
@@ -372,7 +375,9 @@ class TestAnswerMustNotBeSql:
 
 class TestLogging:
     def test_start_and_success_are_logged_with_row_count(self, fake_client, caplog):
-        fake_client("The total is 5,329,008.")
+        # Figures drawn from GROUPED: an answer citing a total it worked out
+        # itself is now replaced before it can be logged as a success.
+        fake_client("NA leads on 1801861, ahead of LATAM on 1420697.")
         with caplog.at_level("INFO", logger="llm"):
             llm.generate_answer("Total?", GROUPED)
         messages = [record.getMessage() for record in caplog.records]

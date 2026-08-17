@@ -14,11 +14,13 @@ import pytest
 
 import chart
 from chart import (
+    ChartDecision,
     ChartError,
     ChartType,
     create_chart,
     is_chart_request,
     requested_chart_type,
+    recommend_chart,
     resolve_chart_type,
     select_chart_type,
     strip_chart_directive,
@@ -125,7 +127,7 @@ class TestIsChartRequest:
         ],
     )
     def test_ignores_ordinary_questions(self, question):
-        """A chart must be asked for, never inferred from the result shape."""
+        """This helper detects explicit wording; automatic intent is separate."""
         assert is_chart_request(question) is False
 
     @pytest.mark.parametrize("value", [None, "", "   ", 42])
@@ -242,6 +244,93 @@ class TestAutomaticSelection:
         first = select_chart_type("Compare amounts by region", REGION_AMOUNTS)
         for _ in range(5):
             assert select_chart_type("Compare amounts by region", REGION_AMOUNTS) is first
+
+
+class TestChartRecommendation:
+    """Usefulness combines generic intent with the authoritative result shape."""
+
+    def test_scalar_result_has_no_automatic_chart(self):
+        scalar = make_result(pd.DataFrame({"win_rate": [0.42]}))
+
+        recommendation = recommend_chart("What is the win rate?", scalar)
+
+        assert recommendation.decision is ChartDecision.NO_CHART
+        assert recommendation.should_render is False
+
+    def test_single_entity_result_has_no_automatic_chart(self):
+        entity = make_result(
+            pd.DataFrame({"opportunity_id": ["OPP-1014"], "stage": ["Proposal"], "amount": [10]})
+        )
+
+        recommendation = recommend_chart("What stage is OPP-1014 in?", entity)
+
+        assert recommendation.decision is ChartDecision.NO_CHART
+        assert recommendation.should_render is False
+
+    def test_categorical_comparison_is_automatically_useful(self):
+        recommendation = recommend_chart(
+            "Compare opportunity value across regions.", REGION_AMOUNTS
+        )
+
+        assert recommendation.decision is ChartDecision.AUTO_USEFUL
+        assert recommendation.should_render is True
+        assert recommendation.chart_type is ChartType.BAR
+
+    def test_time_series_is_automatically_useful(self):
+        recommendation = recommend_chart(
+            "Show opportunity creation over time.", MONTHLY_TREND
+        )
+
+        assert recommendation.decision is ChartDecision.AUTO_USEFUL
+        assert recommendation.chart_type is ChartType.LINE
+
+    def test_relationship_is_automatically_useful(self):
+        recommendation = recommend_chart(
+            "Show the relationship between these two measures.", NUMERIC_PAIR
+        )
+
+        assert recommendation.decision is ChartDecision.AUTO_USEFUL
+        assert recommendation.chart_type is ChartType.SCATTER
+
+    def test_explicit_generic_request_is_distinguished(self):
+        recommendation = recommend_chart("Show me a chart.", REGION_AMOUNTS)
+
+        assert recommendation.decision is ChartDecision.USER_REQUESTED
+        assert recommendation.should_render is True
+        assert recommendation.chart_type is ChartType.BAR
+
+    def test_explicit_compatible_type_is_honoured(self):
+        recommendation = recommend_chart(
+            "Show opportunity value by region as a bar chart.", REGION_AMOUNTS
+        )
+
+        assert recommendation.decision is ChartDecision.USER_REQUESTED
+        assert recommendation.chart_type is ChartType.BAR
+
+    def test_explicit_request_does_not_force_a_scalar_chart(self):
+        scalar = make_result(pd.DataFrame({"win_rate": [0.42]}))
+
+        recommendation = recommend_chart("Show this as a chart.", scalar)
+
+        assert recommendation.decision is ChartDecision.USER_REQUESTED
+        assert recommendation.should_render is False
+        assert recommendation.note and "single value" in recommendation.note
+
+    def test_large_raw_table_has_no_automatic_chart(self):
+        raw = make_result(
+            pd.DataFrame(
+                {
+                    "opportunity_id": [f"OPP-{index}" for index in range(60)],
+                    "stage": ["Open"] * 60,
+                    "amount": list(range(60)),
+                }
+            )
+        )
+
+        recommendation = recommend_chart("Show open opportunities.", raw)
+
+        assert recommendation.decision is ChartDecision.NO_CHART
+        assert recommendation.should_render is False
 
 
 # --- 5. Explicit type vs data compatibility --------------------------------

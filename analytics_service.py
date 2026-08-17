@@ -8,6 +8,7 @@ the structured response.
 
 from __future__ import annotations
 
+import inspect
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,22 +16,34 @@ from time import perf_counter
 from typing import Callable, Optional
 
 from chart import (
+    ChartDecision,
     ChartError,
+    ChartRecommendation,
     ChartType,
     create_chart,
     is_chart_request,
+    recommend_chart,
     requested_chart_type,
     strip_chart_directive,
 )
 from config import NO_DATA_ANSWER
 from database import QueryResult, SqlValidationError, run_query
-from intent import Intent, QueryPlan, is_structure_request, parse_plan
+from intent import (
+    CONVERSATIONAL,
+    Intent,
+    QueryPlan,
+    is_structure_request,
+    parse_plan,
+    numbers_in_context,
+    safe_conversation_response,
+)
 from refusal import category_for_intent, refusal_message
 from llm import (
     INVALID_QUESTION,
     absent_identifiers,
     extract_opportunity_ids,
     generate_answer,
+    generate_conversation_answer,
     generate_conceptual_answer,
     generate_plan,
     is_comparison_question,
@@ -73,6 +86,8 @@ class AnalysisResponse:
     # Internal routing state, kept for logs and tests. Adapters must not
     # serialize it: how a question was classified is not the user's concern.
     intent: Intent = Intent.DATA_QUERY
+    # Likewise internal-only; public adapters expose chart output, not policy.
+    chart_decision: ChartDecision = ChartDecision.NO_CHART
 
 
 def adapt_question_for_chart(
@@ -186,7 +201,6 @@ def _conceptual_response(
     display_question: str,
     effective_question: str,
     analytical_question: str,
-    wants_chart: bool,
     started: float,
 ) -> AnalysisResponse:
     """Answer a question that needs no figures, so runs no query.
@@ -213,7 +227,7 @@ def _conceptual_response(
             analytical_question=analytical_question,
             answer=refusal_message(display_question),
             result=None,
-            chart_requested=wants_chart,
+            chart_requested=False,
             chart_path=None,
             chart_type=None,
             chart_note=None,
@@ -223,6 +237,7 @@ def _conceptual_response(
             refused=True,
             elapsed_seconds=elapsed,
             intent=plan.intent,
+            chart_decision=ChartDecision.NO_CHART,
         )
 
     logger.info(
@@ -235,21 +250,91 @@ def _conceptual_response(
         analytical_question=analytical_question,
         answer=answer,
         result=None,
-        chart_requested=wants_chart,
+        chart_requested=False,
         chart_path=None,
         chart_type=None,
-        chart_note=(
-            "This answer explains what the data records. Ask for the figures and "
-            "I will look them up."
-            if wants_chart
-            else None
-        ),
+        chart_note=None,
         answer_fallback_used=False,
         answer_error=None,
         chart_error=None,
         refused=False,
         elapsed_seconds=elapsed,
         intent=plan.intent,
+        chart_decision=ChartDecision.NO_CHART,
+    )
+
+
+def _general_conversation_response(
+    *,
+    plan: QueryPlan,
+    respond: Callable[..., str],
+    conversation_context: Optional[str],
+    display_question: str,
+    effective_question: str,
+    analytical_question: str,
+    started: float,
+) -> AnalysisResponse:
+    """Return a valid social turn without SQL, rows, charts, or DuckDB."""
+    answer_error: Optional[Exception] = None
+    answer_fallback_used = False
+    try:
+        try:
+            signature = inspect.signature(respond)
+        except (TypeError, ValueError):
+            produced = respond(analytical_question)
+        else:
+            accepts_context = (
+                "conversation_context" in signature.parameters
+                or any(
+                    parameter.kind is inspect.Parameter.VAR_KEYWORD
+                    for parameter in signature.parameters.values()
+                )
+            )
+            produced = (
+                respond(
+                    analytical_question,
+                    conversation_context=conversation_context,
+                )
+                if accepts_context
+                else respond(analytical_question)
+            )
+        answer = safe_conversation_response(
+            produced,
+            grounded_numbers=numbers_in_context(conversation_context)
+            | numbers_in_context(analytical_question),
+        )
+        if answer is None:
+            raise RuntimeError("Conversational answer could not be returned safely.")
+    except Exception as exc:
+        logger.error("Conversational answer generation failed: %s", str(exc))
+        answer = "Sorry, I had trouble with that one. Could you try rephrasing it?"
+        answer_error = exc
+        answer_fallback_used = True
+
+    elapsed = perf_counter() - started
+    logger.info(
+        "Assistant request answered conversationally in %.3fs; no query was executed.",
+        elapsed,
+    )
+    return AnalysisResponse(
+        original_question=display_question,
+        effective_question=effective_question,
+        analytical_question=analytical_question,
+        answer=answer,
+        result=None,
+        chart_requested=False,
+        chart_path=None,
+        chart_type=None,
+        chart_note=None,
+        answer_fallback_used=answer_fallback_used,
+        answer_error=answer_error,
+        chart_error=None,
+        refused=False,
+        elapsed_seconds=elapsed,
+        # The route actually taken, not the family it belongs to: three intents
+        # share this stage, and a log that flattened them would hide which.
+        intent=plan.intent,
+        chart_decision=ChartDecision.NO_CHART,
     )
 
 
@@ -257,10 +342,12 @@ def process_question(
     question: str,
     *,
     original_question: Optional[str] = None,
+    conversation_context: Optional[str] = None,
     plan_generator: Optional[Callable[[str], QueryPlan]] = None,
     sql_generator: Optional[Callable[[str], str]] = None,
     query_runner: Optional[Callable[[str], QueryResult]] = None,
     answer_generator: Optional[Callable[[str, QueryResult], str]] = None,
+    conversation_answer_generator: Optional[Callable[..., str]] = None,
     conceptual_answer_generator: Optional[Callable[[str], str]] = None,
     chart_creator: Optional[
         Callable[[str, QueryResult], tuple[Path, ChartType, Optional[str]]]
@@ -274,9 +361,18 @@ def process_question(
     runner is called once at most; the returned ``QueryResult`` is passed by
     identity to answer and chart generation.
 
+    ``conversation_context`` is optional, bounded semantic orientation from the
+    active persisted conversation. It is supplied to the default planning stage
+    and, for GENERAL_CONVERSATION only, the schema-free conversational answer
+    stage. It never reaches grounded result answering, charting, or DuckDB. The
+    current question still passes the deterministic structure gate before either
+    the planner or any context can influence routing.
+
     ``plan_generator`` is the current first stage: it routes the question and
     returns the SQL to run, if any.  ``sql_generator`` remains supported for
-    callers that only produce a statement.
+    callers that only produce a statement.  One-argument injected generators
+    stay compatible, while context-aware test adapters can explicitly accept a
+    ``conversation_context`` keyword.
     """
     started = perf_counter()
     if not isinstance(question, str):
@@ -293,16 +389,36 @@ def process_question(
     )
 
     if plan_generator is not None:
-        make_plan = plan_generator
+
+        def make_plan(q: str) -> QueryPlan:
+            """Call an injected planner without mistaking its TypeError for a retry."""
+            try:
+                signature = inspect.signature(plan_generator)
+            except (TypeError, ValueError):
+                return plan_generator(q)
+            accepts_context = (
+                "conversation_context" in signature.parameters
+                or any(
+                    parameter.kind is inspect.Parameter.VAR_KEYWORD
+                    for parameter in signature.parameters.values()
+                )
+            )
+            if accepts_context:
+                return plan_generator(q, conversation_context=conversation_context)
+            return plan_generator(q)
+
     elif sql_generator is not None:
 
         def make_plan(q: str) -> QueryPlan:
             return _plan_from_sql_generator(sql_generator, q)
 
     else:
-        make_plan = generate_plan
+
+        def make_plan(q: str) -> QueryPlan:
+            return generate_plan(q, conversation_context=conversation_context)
     execute = query_runner or run_query
     answer_from_result = answer_generator or generate_answer
+    respond_conversationally = conversation_answer_generator or generate_conversation_answer
     explain_concept = conceptual_answer_generator or generate_conceptual_answer
     render_chart = chart_creator or create_chart
     record_query = query_logger or _log_query_details
@@ -325,7 +441,7 @@ def process_question(
                 display_question, category_for_intent(intent, display_question)
             ),
             result=None,
-            chart_requested=wants_chart,
+            chart_requested=False,
             chart_path=None,
             chart_type=None,
             chart_note=None,
@@ -335,6 +451,7 @@ def process_question(
             refused=True,
             elapsed_seconds=elapsed,
             intent=intent,
+            chart_decision=ChartDecision.NO_CHART,
         )
 
     logger.info("Analytics request started (chart_requested=%s).", wants_chart)
@@ -355,6 +472,20 @@ def process_question(
         # database errors) still propagate untouched.
         return refuse("no valid SQL could be generated")
 
+    if plan.intent in CONVERSATIONAL:
+        # Greeting, meta-conversation, an ordinary off-topic question, or a
+        # request too ambiguous to run: all answered from words alone, by the
+        # same second call, touching no database.
+        return _general_conversation_response(
+            plan=plan,
+            respond=respond_conversationally,
+            conversation_context=conversation_context,
+            display_question=display_question,
+            effective_question=effective_question,
+            analytical_question=analytical_question,
+            started=started,
+        )
+
     if not plan.is_answerable:
         return refuse("routed away from analytics", plan.intent)
 
@@ -368,7 +499,6 @@ def process_question(
             display_question=display_question,
             effective_question=effective_question,
             analytical_question=analytical_question,
-            wants_chart=wants_chart,
             started=started,
         )
 
@@ -383,6 +513,12 @@ def process_question(
         return refuse("generated SQL was refused by the safety guard", Intent.UNSAFE)
 
     record_query(sql, result)
+
+    # This is a pure, post-query decision over the one authoritative result.
+    # It cannot add a model call or a second analytical database execution.
+    chart_recommendation: ChartRecommendation = recommend_chart(
+        effective_question, result
+    )
 
     answer: Optional[str]
     answer_error: Optional[Exception] = None
@@ -414,17 +550,17 @@ def process_question(
     chart_type: Optional[ChartType] = None
     chart_note: Optional[str] = None
     chart_error: Optional[str] = None
-    if wants_chart:
+    if chart_recommendation.decision is not ChartDecision.NO_CHART:
         blocked_reason = incomplete_comparison_reason(analytical_question, result)
     else:
         blocked_reason = None
 
-    if wants_chart and blocked_reason:
+    if blocked_reason:
         # Skip only the chart. The answer and the result table still stand, and
         # nothing is re-queried or re-generated to reach this decision.
         logger.warning("Comparison chart suppressed: %s", blocked_reason)
         chart_note = blocked_reason
-    elif wants_chart:
+    elif chart_recommendation.should_render:
         try:
             chart_path, chart_type, chart_note = render_chart(effective_question, result)
         except ChartError as exc:
@@ -433,6 +569,8 @@ def process_question(
         except Exception:
             logger.exception("Unexpected error while generating a chart.")
             chart_error = "an unexpected error occurred. See logs/app.log."
+    elif chart_recommendation.decision is ChartDecision.USER_REQUESTED:
+        chart_note = chart_recommendation.note
 
     elapsed = perf_counter() - started
     logger.info(
@@ -447,7 +585,7 @@ def process_question(
         analytical_question=analytical_question,
         answer=answer,
         result=result,
-        chart_requested=wants_chart,
+        chart_requested=chart_recommendation.decision is not ChartDecision.NO_CHART,
         chart_path=chart_path,
         chart_type=chart_type,
         chart_note=chart_note,
@@ -457,4 +595,5 @@ def process_question(
         refused=False,
         elapsed_seconds=elapsed,
         intent=plan.intent,
+        chart_decision=chart_recommendation.decision,
     )

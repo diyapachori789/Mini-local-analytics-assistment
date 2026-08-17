@@ -1,4 +1,4 @@
-# Mini Local Analytics Assistant
+# Analytics Assistant
 
 A tiny, single-engine version of a SQL metrics engine for Salesforce-style opportunity
 data. Ask a question in plain English; the assistant writes SQL, runs it against a local
@@ -11,8 +11,11 @@ Answer:
 The total amount of closed won opportunities is $5,329,008.
 ```
 
-Everything except the language-model call runs locally. The dataset never leaves the
-machine — only the table schema, the question, and the query result are sent to the API.
+Everything except the language-model calls runs locally. The dataset never leaves the
+machine. Analytics planning receives the table schema and current question; grounded
+answering receives only the question and returned rows. For an active follow-up, only
+the bounded safe conversation window needed to resolve meaning is included, never as
+data truth. A general conversational answer receives no schema or query result.
 
 ---
 
@@ -20,11 +23,12 @@ machine — only the table schema, the question, and the query result are sent t
 
 - Loads `data/sample_opportunities.csv` (300 synthetic Salesforce opportunities) into DuckDB
 - Accepts a plain-English business question
+- Handles greetings, thanks, identity/capability questions, acknowledgements, and goodbyes naturally
 - Uses an LLM to write DuckDB SQL from the live table schema
 - Validates the SQL and refuses anything that is not a single read-only statement
 - Executes it against DuckDB, so the numbers come from the data rather than the model
 - Sends the result back to the LLM to phrase a natural-language answer
-- Draws a matplotlib PNG when — and only when — the question asks for a chart
+- Draws a matplotlib PNG when a visualization meaningfully improves the result, or when a compatible chart is requested
 - Logs every generated query so any number can be re-checked
 
 ---
@@ -34,7 +38,7 @@ machine — only the table schema, the question, and the query result are sent t
 ```
 Plain-English question
         ↓
-   chart intent  ──  deterministic: is a chart asked for, and of what type?
+ explicit chart intent  ──  deterministic presentation wording, if present
         ↓
    Groq call #1  ──  schema-aware routing + SQL generation
         ↓
@@ -53,7 +57,7 @@ QueryResult       Answer
    ↓                              ↓
  Groq call #2                matplotlib
  answer grounded             PNG in charts/
- strictly in those rows      (only if requested)
+ strictly in those rows      (only if useful/requested)
    ↓                              ↓
 Natural-language answer     "Open chart" link
 ```
@@ -61,6 +65,12 @@ Natural-language answer     "Open chart" link
 The answer and the chart are built from the **same** `QueryResult`. The query runs
 once; nothing is recalculated, and no second model call is made for the chart.
 Every branch above costs **at most two** model calls.
+
+`GENERAL_CONVERSATION` is the additional result-free branch: routing is call #1,
+and a schema-free conversational response is call #2. It never constructs SQL,
+touches DuckDB, creates a `QueryResult`, or enters chart recommendation. Unsupported
+and unsafe requests still use locally written scope/safety replies after routing;
+deterministic metadata requests are refused before any model call.
 
 ### 1. The question is routed, and English becomes SQL
 
@@ -91,6 +101,7 @@ schema is the only description of what can be answered.
 | `DATA_QUERY` | a figure, list, ranking, breakdown or comparison | yes | answer + table + optional chart |
 | `DATA_EXPLANATION` | what a measure means, what moves it, why it looks as it does | usually | same, worded as an explanation |
 | `DATA_EXPLANATION` | purely definitional | null | explanation with **no** figures, no query |
+| `GENERAL_CONVERSATION` | greeting, thanks, identity, capabilities, acknowledgement, goodbye | null | brief natural reply; no result or chart |
 | `INSUFFICIENT_CONTEXT` | only makes sense as a follow-up | null | asks for the whole question |
 | `UNSUPPORTED` | not about this data | null | friendly refusal |
 | `UNSAFE` | modify, administer, or reveal structure | null | safety refusal |
@@ -120,7 +131,7 @@ Three further layers back this up:
 | Layer | Protection |
 | --- | --- |
 | `database.run_query()` | Re-validates independently, so a bug in a caller cannot become a write |
-| DuckDB latch | `enable_external_access` is switched off after load — a one-way latch DuckDB refuses to reopen, blocking arbitrary file reads and `COPY … TO` exfiltration |
+| DuckDB latch | Startup makes a best-effort attempt to switch `enable_external_access` off after load. When DuckDB accepts it, the setting is one-way; if it cannot be applied, startup logs a warning and the SQL guard plus database revalidation remain in force. |
 | Answer step | Receives only the result rows; it never sees the schema and never produces SQL |
 
 ### 3. DuckDB executes the query
@@ -152,12 +163,20 @@ Safety properties of this step:
 
 ### 5. Charts
 
-A chart is drawn **only when the question asks for one**. A grouped or multi-row result
-is never on its own a reason to draw something the user did not request.
+Chart usefulness is decided locally after DuckDB returns the one authoritative
+`QueryResult`. The decision combines generic question/query semantics with row count,
+column types, and result shape. A scalar, a single entity, an empty result, or a large raw
+table does not get an automatic chart merely because matplotlib could draw something.
 
-`is_chart_request()` looks for explicit wording — *chart, graph, plot, diagram,
-visualise* — using a regular expression. No model call is involved: the decision is
-deterministic, instant, free, and testable.
+Categorical comparisons normally become bars, temporal measures become lines,
+part-to-whole results can become pies when the slice count and values are suitable, and
+relationships between two meaningful numeric measures can become scatter plots. These
+automatic decisions use no model call and no second query.
+
+`is_chart_request()` separately detects explicit wording — *chart, graph, plot,
+diagram, visualise* — so a natural-language request is still honoured when the returned
+data supports a meaningful visualization. Internally the service distinguishes automatic,
+explicit, and no-chart outcomes; those policy labels are never serialized to the browser.
 
 The charting words are then stripped before the question reaches either LLM call.
 *"…and chart it"* cannot be expressed in SQL, and leaving it in invites a refusal:
@@ -193,10 +212,52 @@ charts/how_many_opportunities_did_each_owner_cl_20260810_235015.png
 
 The file stays on disk after the app exits.
 
-### 6. Persistent query history
+### 6. Persistent conversations
 
-Completed analyses are saved on this machine so history survives a browser
-refresh, a browser restart, cleared site data, and restarting the app.
+The browser groups turns into persistent conversations in `history.duckdb`, so
+chats survive browser and Flask restarts, Docker recreation, and cleared browser
+storage. The database is authoritative; JavaScript memory and `localStorage` are
+not conversation storage. On refresh, the browser restores the most recently
+updated saved chat before allowing another message; starting a different chat is
+an explicit **+ New Chat** action.
+
+`conversations` holds an opaque UUID, a locally generated safe title, and UTC
+timestamps. `conversation_messages` holds ordered user/assistant prose plus safe
+row, chart, refusal, success, and elapsed-time metadata. It deliberately excludes
+generated SQL, schemas, prompts, API keys, raw provider payloads, absolute paths,
+exception text, and full result rows.
+
+Only the latest six safe user/assistant messages (2,400 characters total and 600
+characters each) can reach routing as untrusted semantic orientation. This helps
+resolve follow-ups but never supplies data truth: DuckDB is queried anew for current
+figures. For `GENERAL_CONVERSATION`, the same bounded safe prose may orient the
+schema-free conversational answer. It never reaches grounded result answering,
+charting, or DuckDB, and no route adds a third model call.
+
+Pure conversational turns are persisted as ordinary user/assistant pairs with nullable
+analytics metadata. They show no row count, data toggle, chart, or “Analysis complete”
+status. A social opening keeps the neutral **New chat** title; the first meaningful
+analytics question supplies the stable local title without an extra model call.
+
+Opening a saved chat loads messages only; it never calls Groq or reruns analytics.
+Current-turn rows can be expanded inline, while old messages explain that detailed
+rows were not persisted. Existing PNGs load by safely revalidated filename; a
+missing PNG is reported as unavailable rather than regenerated.
+
+The stored transcript remains complete, but a reopened view returns its newest 200
+messages at once. If a chat is longer, the API marks it as truncated and the UI
+shows an explicit notice rather than silently presenting a partial transcript.
+
+Use **+ New Chat** to begin another persisted conversation. Deleting one chat or
+**Delete all chats** requires confirmation and affects conversation records only,
+never analytics data, charts, logs, or `.env`.
+
+The CLI deliberately keeps its established simple compatibility model: each
+completed CLI request is a standalone legacy history record. When conversation
+storage is initialized, any previously unmapped legacy record is migrated into
+its own one-turn conversation without changing or removing the original record.
+
+#### Legacy query-history archive
 
 **Where:** `history.duckdb` in the project root — a **separate** DuckDB file from
 `analytics.duckdb`. That separation is deliberate:
@@ -206,8 +267,9 @@ refresh, a browser restart, cleared site data, and restarting the app.
   dataset. History stored there would be lost with it.
 - Each database keeps its own single-writer lock, so history never contends with
   analytics.
-- Analytics connections latch `enable_external_access` off, which blocks `ATTACH`
-  outright, so the two stores could not share a connection even if that were wanted.
+- Analytics initialization makes a best-effort attempt to disable DuckDB external
+  access. If that setting cannot be applied, startup logs a warning and continues;
+  generated SQL is still protected by the shared SQL guard and database revalidation.
 
 **Table `query_history` stores:** id (server-generated UUID), UTC timestamp, the
 original question, the generated answer, row count, truncation flag, max rows,
@@ -219,24 +281,26 @@ keys, stack traces or raw exception text, absolute paths, request headers, and
 full result rows. History is a lightweight record of questions and answers, not a
 cache of business data or an audit-query browser.
 
-**Retention:** records are kept until you delete them. Nothing expires
-automatically.
+**Migration:** when conversation storage is initialized, each unmapped legacy
+record is copied atomically into a one-turn conversation containing a user and
+assistant message. `legacy_history_migrations` records the mapping, so repeated
+initialization never duplicates conversations and the original rows remain
+available.
 
 **Charts:** only the bare filename is stored, never a path. On read the filename
 is re-validated and checked against the charts directory; if the PNG has been
 removed the record still loads and is shown as *Chart unavailable*. A missing
 chart is never regenerated and never re-runs the query.
 
-**Two different clear actions:**
+**Compatibility API:** `GET` and `DELETE /api/history` remain for the CLI and
+older integrations. The browser uses `/api/conversations`; its **Delete all
+chats** control does not delete legacy archive rows, charts, logs, analytics data,
+or `.env`.
 
-| Button | Effect |
-| --- | --- |
-| **Clear session** | Clears only what is on screen. Saved history is kept |
-| **Clear saved history** | Asks for confirmation, then deletes every saved record via `DELETE /api/history`. Charts, logs, `analytics.duckdb`, and `.env` are untouched |
-
-**Privacy boundary:** history never leaves the machine and is never sent to the
-language model. Clicking a history entry only fills the question box — it never
-re-runs the question automatically.
+**Privacy boundary:** legacy archive rows are not treated as global model memory.
+Only the bounded safe messages from the active saved conversation can provide
+semantic orientation to the planner; opening either legacy history or a saved chat
+never reruns an analysis automatically.
 
 Browser `localStorage` now holds display preferences only (theme and selected
 view). Any history left by an earlier build is discarded on load.
@@ -279,7 +343,7 @@ still surface as errors. Only unsupported questions become friendly replies.
 | Component | Choice |
 | --- | --- |
 | Database | DuckDB 1.5.5 (embedded, local file) |
-| LLM | Groq — `llama-3.1-8b-instant` |
+| LLM | Groq — `openai/gpt-oss-120b` |
 | Charts | matplotlib (Agg backend, no display required) |
 | Data handling | pandas |
 | Config | python-dotenv |
@@ -295,9 +359,9 @@ config.py            paths, model, limits, .env loading
 sql_guard.py         SQL cleaning + read-only validation (no other dependencies)
 database.py          DuckDB lifecycle, schema extraction, guarded execution
 intent.py            routing decision: parses {intent, sql} into a QueryPlan
-llm.py               both Groq calls: routing/SQL generation and answers
+llm.py               routing/SQL plus one grounded, conceptual, or conversational answer
 chart.py             chart intent, type selection, matplotlib rendering
-history_repository.py persistent query history (separate history.duckdb)
+history_repository.py legacy archive + persistent conversations (separate history.duckdb)
 logging_config.py    rotating file + console logging, API-key redaction
 app.py               command-line interface
 data/                sample_opportunities.csv
@@ -325,7 +389,7 @@ Create a `.env` file in the project root:
 
 ```
 GROQ_API_KEY=your_key_here
-GROQ_MODEL=llama-3.1-8b-instant   # optional, this is the default
+GROQ_MODEL=openai/gpt-oss-120b   # optional, this is the default
 ```
 
 `.env` is git-ignored and the key is never logged — a redaction filter scrubs it from every
@@ -399,7 +463,9 @@ Chart generated successfully:
 Open chart
 ```
 
-A question with no chart wording produces an answer and nothing else — no PNG, no link.
+A scalar or otherwise unsuitable result produces an answer without a PNG, even if charting
+is technically possible. A comparison or trend can receive an automatic chart without
+requiring special chart wording.
 
 ---
 
@@ -425,17 +491,27 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) after starting the web UI.
 The server binds only to loopback and starts DuckDB once, rather than on each
 page request.
 
-The dashboard provides a question form, optional chart toggle and type chooser,
-returned result rows, chart preview, browser-local recent history, and a
-session-generated chart gallery. Clicking an example or history item only fills
-the question field; it never reruns analysis. Clear Session removes browser UI
-state only—it does not delete the database, logs, or chart files.
+The browser presents the user-facing **Analytics Assistant** brand, an empty-chat welcome
+screen with safe question suggestions, a conversation stream, and a question-only bottom
+composer. There is no chart toggle or chart-type selector: users can ask naturally and the
+backend decides locally whether a chart adds value. **+ New Chat** creates a blank persisted chat without
+deleting previous ones. The sidebar groups saved chats by the browser's local date
+and loading one is read-only: it fetches only saved messages.
 
-Each submitted question follows the same shared backend service as the CLI:
-one generated SQL statement executes once, then the resulting `QueryResult`
-supplies the answer, table, and optional existing matplotlib PNG. The normal UI
-intentionally provides no raw SQL, schema browser, log viewer, CSV upload,
-conversational memory, or multi-user features.
+Each submitted message follows the same shared backend service as the CLI: at
+most one generated analytical SQL statement executes, and the resulting
+`QueryResult` supplies the grounded answer, expandable current-turn table, and
+optional existing matplotlib PNG. Charts appear inside the assistant message.
+Historical messages never regenerate data; saved result rows are intentionally
+unavailable after reload.
+
+Greetings and other general conversational turns use the same assistant-message UI,
+but execute no analytical SQL and display no table, row count, chart, or permanent
+completion banner. Mixed messages such as a greeting followed by a data request still
+take the analytics route, and deterministic metadata/security gates remain first.
+
+The normal UI intentionally provides no raw SQL, schema browser, log viewer, CSV
+upload, browser-stored transcript, or multi-user support.
 
 CSV storage, DuckDB execution, SQL validation, result handling, and chart
 rendering are local. The configured Groq API receives the information required
@@ -604,9 +680,19 @@ log files only and are never returned to the browser.
 
 ## Notes on the model
 
-Currently `llama-3.1-8b-instant`. The project started on `llama-3.3-70b-versatile` and moved
-after exhausting that model's daily token quota; quotas are per-model on Groq, so switching
-is the fastest recovery. Set `GROQ_MODEL` in `.env` to change it — no code edit needed.
+Currently `openai/gpt-oss-120b`.
+
+The project has now migrated twice. It started on `llama-3.3-70b-versatile`, moved to
+`llama-3.1-8b-instant` on 2026-08-10 when the 70b daily token quota ran out, and moved to
+`openai/gpt-oss-120b` on 2026-08-17 when Groq retired **both** Llama models. Every request
+was failing with a model-not-found error, which the browser reported as
+"The language model is unavailable. Please try again later."
+
+Groq suggested two replacements. `qwen/qwen3.6-27b` was tested and rejected: it writes its
+chain of thought into `message.content`, so the routing JSON arrives wrapped in `<think>`
+blocks and the reply hits the token ceiling before the answer starts. Reading that would
+mean loosening the plan parser, which is the one component that has to stay strict.
+`openai/gpt-oss-120b` returns reasoning in a separate field and leaves `content` clean.
 
 The prompts were tuned against the 70b model and transferred to the 8b model intact,
 including the trickiest behaviour (turning *"top 5"* into `ORDER BY … LIMIT 5`). Re-run the

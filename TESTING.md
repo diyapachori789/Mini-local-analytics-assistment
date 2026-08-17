@@ -1,4 +1,4 @@
-# TESTING.md — Mini Local Analytics Assistant
+# TESTING.md — Analytics Assistant
 
 Regression testing document for the natural-language → SQL analytics pipeline.
 
@@ -24,8 +24,9 @@ must therefore be re-verified against Section 3 before it is accepted.
 | SQL generation correctness (`generate_sql`) | Groq model internals / model quality |
 | SQL cleaning (`clean_sql`) | DuckDB engine correctness |
 | SQL safety validation (`validate_sql`) | Network reliability |
-| Database lifecycle (`database.py`) | Charting (`chart.py` — not implemented) |
-| Error handling and failure messages | Natural-language answer step (not built yet) |
+| Database lifecycle (`database.py`) | Groq service availability and model internals |
+| Chart usefulness, selection and rendering (`chart.py`) | Browser-engine implementation details |
+| Grounded answers, conversations and web API | Network reliability |
 
 ### 1.3 Test approach
 
@@ -53,22 +54,22 @@ Two properties make this testable despite involving an LLM:
 > A single unexpected failure should be re-run once before being treated as a regression.
 
 > **Model is configurable.** `MODEL_NAME` in `config.py` defaults to
-> `llama-3.1-8b-instant` and is overridable with `GROQ_MODEL` in `.env` or the
+> `openai/gpt-oss-120b` and is overridable with `GROQ_MODEL` in `.env` or the
 > environment. Groq quotas are per model, so switching models is the fastest recovery
 > from a daily token limit. Re-run Section 4 after any model change: the prompt was
 > tuned against one model and its behaviour is not guaranteed to transfer.
 
 ### 1.3a Current suite at a glance
 
-Last measured 2026-08-12. Section 6 records how the suite grew phase by phase;
+Last measured 2026-08-17. Section 6 records how the suite grew phase by phase;
 this table is the current state.
 
 | | |
 | --- | --- |
-| **Offline tests** | **628 passing** |
+| **Offline tests** | **929 passing** |
 | **Live tests** | **31, deselected by default** — never run as part of the offline suite |
 | **Real Groq calls in the offline suite** | **none.** Both LLM calls are mocked; a fixture fails the test if a client is constructed on a path that should not need one |
-| Test files | 14 under `tests/` |
+| Test files | 20 test modules plus `conftest.py` |
 
 What the offline suite covers:
 
@@ -78,13 +79,15 @@ What the offline suite covers:
 | Read-only execution guard, row cap, typed errors | `test_execution.py`, `test_database.py` |
 | Single-query invariant and one shared `QueryResult` | `test_analytics_service.py`, `test_app_flow.py` |
 | Answer grounding, truncation, rate limits | `test_answer.py` |
-| Chart intent, type selection, rendering, fallbacks | `test_chart.py` |
+| Automatic/explicit/no-chart decisions, type selection, rendering, fallbacks | `test_chart.py`, `test_analytics_service.py` |
 | Multi-entity comparisons and absent-entity grounding | `test_comparison_questions.py` |
 | Flask API contract, validation, security headers, path traversal | `test_web_app.py` |
-| Persistent history API, chart HTTP integration, `image/png` round trip | `test_web_history.py` |
-| History repository, UTC timestamps, filename safety | `test_history_repository.py` |
+| Legacy history compatibility API, chart HTTP integration, `image/png` round trip | `test_web_history.py` |
+| Legacy history + conversation repository, UTC timestamps, filename safety | `test_history_repository.py` |
+| Conversation CRUD, atomic turns, migration, bounded context, transcript API | `test_conversations.py` |
 | Config, logging levels, secret redaction, **web logging** | `test_config_logging.py` |
 | Global intent routing, paraphrase equivalence, call budget | `test_intent_routing.py` |
+| Natural conversation, mixed intent, zero-query/UI/persistence matrix | `test_general_conversation.py` |
 | Refusal categories, deterministic replies, metadata blocking | `test_refusal.py` |
 | Refused questions end to end, real errors staying errors | `test_refusal_web.py` |
 | CLI regression and history persistence | `test_app_flow.py` |
@@ -95,6 +98,38 @@ What the offline suite covers:
 at a per-test temporary file. No test can write to the production `history.duckdb`,
 including CLI and web tests that persist history as a side effect. This was added
 after a run polluted the real database.
+
+### 1.3c Persistent conversation coverage
+
+Conversation tests use a temporary `history.duckdb` and fake processors only.
+They prove that migration keeps the original `query_history` records, repeated
+initialization does not duplicate a migrated pair, one save transaction creates
+both user and assistant messages, IDs are isolated by conversation, and no SQL,
+schema, result rows, provider data, paths, or secrets reach a transcript API.
+
+Context tests retain at most six messages, 2,400 total characters, and 600
+characters per message. They confirm context reaches planning and only the
+schema-free conversational answer when that route is selected; it never reaches
+grounded result answering, charting, or DuckDB. A follow-up still uses one fresh
+analytical `QueryResult`.
+Conversation GET/DELETE tests inject a processor that fails if called, proving
+opening or deleting saved chats does not replay Groq or DuckDB analytics.
+
+### 1.3e Natural conversation coverage
+
+`test_general_conversation.py` scripts every model reply and covers greetings,
+thanks, identity, capabilities, help, acknowledgements, and goodbye. Each is a
+normal assistant message with two model stages at most, zero analytical queries,
+no `QueryResult`, no table, and no chart. The same matrix proves mixed social plus
+analytics wording still executes exactly one query, conceptual analytics executes
+zero, data explanations execute exactly one, out-of-scope requests remain natural
+and result-free, and metadata/security gates retain precedence.
+
+Web tests verify that current and persisted conversational messages carry
+`has_result: false`, the browser suppresses result UI, the pending state says
+“Thinking…”, and no permanent “Analysis complete” copy remains. Title tests keep
+a social-only chat neutral until its first meaningful analytics question. All
+model clients are mocked and the autouse network guard remains active.
 
 **Web logging tests** verify that `logs/web_app.log` is created, rotates with the
 configured bounds, captures Werkzeug records, redacts the API key, does not stack
@@ -142,10 +177,24 @@ Measured 2026-08-13, Docker 29.7.2 / Compose v5.3.1 / WSL 2.7.11.0:
 | Logs survive recreation | ✅ both files continued |
 | Local databases untouched | ✅ 300 opportunities, 22 local history rows |
 | Local CLI after Docker changes | ✅ exit 0 |
-| Offline suite with container running | ✅ 628 passed |
+| Offline suite with container running | ✅ 986 passed |
 
 Container databases live under `docker-data/`, separate from the local ones, so
 the suite and a running container do not contend for the same DuckDB files.
+
+### 1.3d Conversation Docker verification
+
+Verified 2026-08-15 without a Groq or analytics request:
+
+| Check | Result |
+| --- | --- |
+| Updated image build | Passed with `docker compose build` |
+| Updated container health | `healthy`; local `GET /api/status` returned 200 |
+| Conversation persistence | A blank chat created through `POST /api/conversations` remained readable by the same opaque ID after `docker compose down` and `docker compose up -d` |
+| Test cleanup | The single blank verification chat was deleted afterward; existing chats, charts, analytics data, and logs were not targeted |
+
+This confirms that `docker-data/history.duckdb` persists the new conversation
+tables across container recreation. It does not exercise a live analytics query.
 
 ### 1.4 Verification environment
 
@@ -157,7 +206,7 @@ The results recorded in Section 3 were measured in this environment:
 | Python | 3.13.15 |
 | DuckDB | 1.5.5 |
 | Groq SDK | 1.6.0 |
-| Model | `llama-3.1-8b-instant` (override with `GROQ_MODEL`) |
+| Model | `openai/gpt-oss-120b` (override with `GROQ_MODEL`) |
 | Temperature | 0 |
 | Dataset | `data/sample_opportunities.csv` — 300 rows, 13 columns |
 
@@ -598,6 +647,8 @@ generation · `INF` infrastructure
 
 | Date | Change | Suite Result |
 | --- | --- | --- |
+| 2026-08-17 | **Natural conversational intelligence.** Added the semantic `GENERAL_CONVERSATION` route and a schema-free conversational answer stage within the existing two-call ceiling. Social turns execute no analytical SQL and render no result/chart UI; mixed requests retain analytics precedence; conceptual, follow-up, unsupported, and unsafe behavior remains distinct. Added neutral-until-analytics titles, nullable result metadata, “Thinking…” UI state, and removed permanent “Analysis complete” copy. Identifier omissions now fail closed after the first planning call so no analytical path can spend a third semantic model call. | **929 / 929 offline** · 31 live deselected · 0 real Groq calls |
+| 2026-08-15 | **Analytics Assistant UI + intelligent charts.** Rebranded the web UI, removed the permanent status card and manual chart controls, added the empty-chat welcome/suggestions and minimal composer, and kept charts inline with current and saved assistant messages. Added a deterministic post-query recommendation layer that distinguishes automatic, explicit, and no-chart outcomes; suppresses scalar/single-record/raw-table charts; preserves explicit-type fallbacks; and reuses the one `QueryResult` without another model call or query. | **896 / 896 offline** · 31 live deselected · 0 real Groq calls |
 | 2026-08-08 | Baseline recorded before prompt rework | 9 / 12 generation cases passing |
 | 2026-08-08 | Rewrote the SQL generation prompt in `llm.py`: inverted the `LIMIT` rule from prohibition to positive requirement, coupled ranking to `ORDER BY`, defined column-selection rules, aligned the forbidden-keyword list with the validator regex, added four reference examples | 15 / 15 generation cases passing |
 | 2026-08-08 | Pre-Phase-4 engineering review: fixed dependencies (`groq` added, `openai`/`matplotlib` removed), added project-wide logging with secret redaction, made `config.py` importable without a key, made SQL validation literal-aware, added API timeout/retries, latched DuckDB filesystem access off, fixed `INVALID_QUESTION` output and CLI exit codes, fixed zero-width-character input bug | 15 / 15 generation cases · 40 / 40 offline checks · 3 / 3 CLI smoke tests |
@@ -610,6 +661,8 @@ generation · `INF` infrastructure
 | 2026-08-10 | **Phase 6 — chart generation.** Implemented `chart.py`: deterministic chart-intent detection, explicit-type detection, automatic type selection, four matplotlib renderers, unique PNG filenames and OSC 8 terminal links. Wired into `app.py` sharing the answer's `QueryResult`. Re-added `matplotlib`. Fixed three answer-grounding defects found in live testing: derived arithmetic, counts mislabelled as percentages, and self-ranked superlatives; SQL now computes shares and rates itself. | **396 / 396 offline** (104 new) · 4 chart PNGs generated and validated · 5 / 5 assignment questions · CLI exit 0 |
 | 2026-08-10 | Pre-submission audit: wrote `README.md`; removed regenerable caches (`__pycache__`, `.pytest_cache`); added packaging artifacts to `.gitignore`; verified the assignment's five example questions against hand-written SQL. Added a precision rule to the answer prompt after `0.246377` was reported as "25%", which made EMEA look identical to NA. | **292 / 292 offline** · 5 / 5 assignment questions verified · CLI exit 0 · DB integrity OK · no secrets outside `.env` |
 | 2026-08-10 | **Phase 5 — natural-language answers.** Added `generate_answer()`, `format_result_for_answer()` and a dedicated answer prompt to `llm.py`, reusing the existing Groq client; `app.py` now leads with the answer and keeps SQL + row count beneath it; a failed answer call falls back to displaying the query result. Empty results answered locally with no API call. | **290 / 290 offline** (56 new) · 3 / 3 live end-to-end · 5 / 5 live SQL regression · CLI exit 0 · DB integrity OK · no key in logs |
+| 2026-08-17 | **Output-boundary hardening.** Conceptual answers now pass the deterministic schema filter that conversational replies already used - that stage is the only one handed the real schema, so prompt-only protection was the weakest guard on the most exposed path. The filter became schema-aware (`database.column_identifiers()`) and now also rejects any snake_case token, which catches per-query aliases such as `win_rate_pct` that no column list can contain. Added a numeric grounding check: an answer citing a figure absent from the QueryResult is replaced by a locally built grounded summary - no repair model call, no second query. Removed the unused legacy history saver from `web_app.py`, leaving exactly one persistence path per browser turn. | **986 / 986 offline** (44 new) · 31 live deselected · 0 real Groq calls |
+| 2026-08-17 | Migrated to `openai/gpt-oss-120b`. Groq retired both `llama-3.1-8b-instant` (the configured default) and `llama-3.3-70b-versatile`, so every request failed and the UI showed "The language model is unavailable". Verified against Groq's live model list rather than documentation. `qwen/qwen3.6-27b` was tested and rejected: it emits `<think>` reasoning into `message.content`, breaking the plan parser and truncating answers at the token ceiling. Three answer-prompt rules were tightened after the new model breached them: no column names in prose, no raw float expansions, no naming the query as a figure's source. | **942 / 942 offline** · 16 live calls · routing, SQL, grounded answers, charts and the 2-call budget all verified · Docker healthy on the new model |
 | 2026-08-10 | Switched default model to `llama-3.1-8b-instant` after the 70b daily token quota was exhausted. `MODEL_NAME` is now overridable via `GROQ_MODEL`; `load_dotenv()` moved above the `os.getenv` calls so `.env` settings are actually read. No prompt, validation, security or Phase 4 logic changed. | **234 / 234 offline** · 7 / 7 targeted live · 3 / 3 requested questions generated, guarded, executed, rendered · CLI exit 0 · DB integrity OK |
 
 ---
@@ -652,8 +705,8 @@ the analytics workflow.
 
 - One SQL-generation call and one query execution per service request.
 - Identity sharing of the one `QueryResult` across answer and chart consumers.
-- No chart creation without explicit intent; deterministic UI chart wording;
-  existing chart fallback remains authoritative.
+- Deterministic automatic/explicit/no-chart decisions from the one result;
+  existing explicit-type fallback remains authoritative.
 - Empty-result and answer-fallback behavior without a second query or API call.
 - CLI delegation to the shared service.
 - Flask request validation, safe response serialization, safe errors, status
@@ -661,7 +714,11 @@ the analytics workflow.
 - Browser source checks for duplicate-submit protection, no raw HTML injection,
   no generated-SQL UI, and accurate truncation wording.
 
-### 7.4 Verification
+### 7.4 Historical Phase 7 verification
+
+This records the baseline when the original one-result web UI was introduced.
+The current conversation implementation and its current suite count are recorded
+in Sections 1.3a and 1.3c.
 
 The final default offline run was:
 

@@ -1,4 +1,4 @@
-"""Persistent history through the web adapter, plus the chart HTTP path.
+"""Persistent conversations through the web adapter, plus legacy history and charts.
 
 Every test is offline: the analytics processor is a stub, history uses the
 temporary database from the autouse conftest fixture, and no Groq call is made.
@@ -79,6 +79,15 @@ def ask(client, question: str = "What is the win rate by region?", **extra):
     payload = {"question": question}
     payload.update(extra)
     return client.post("/api/query", json=payload)
+
+
+def load_saved_conversation(client, conversation_id: str) -> dict:
+    """Fetch the safe persisted transcript for one completed browser turn."""
+    response = client.get(f"/api/conversations/{conversation_id}")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    return payload["conversation"]
 
 
 class TestHistoryApiContract:
@@ -253,60 +262,85 @@ class TestClearHistoryApi:
 
 
 class TestQueryPersistence:
-    """Exactly one record per completed analytics response, and none otherwise."""
+    """Exactly one persisted conversation turn per completed analytics response."""
 
-    def test_successful_query_saves_exactly_one_record(self, app_factory):
+    def test_successful_query_saves_one_user_and_assistant_turn(self, app_factory):
         client = app_factory(lambda *_a, **_k: make_response()).test_client()
         payload = ask(client).get_json()
 
-        assert payload["history_saved"] is True
-        records = history_repository.list_history()
-        assert len(records) == 1
-        assert records[0].success is True
+        assert payload["conversation_saved"] is True
+        conversation = load_saved_conversation(client, payload["conversation_id"])
+        assert [message["role"] for message in conversation["messages"]] == ["user", "assistant"]
+        assert conversation["messages"][0]["content"] == "What is the win rate by region?"
+        assert conversation["messages"][1]["content"] == "NA has the highest win rate."
+        assert conversation["messages"][1]["meta"]["success"] is True
+        assert client.get("/api/conversations").get_json()["conversations"][0]["message_count"] == 2
+        # Browser queries do not create a second legacy flat-history record.
+        assert history_repository.list_history() == []
 
-    def test_refusal_saves_one_record(self, app_factory):
+    def test_refusal_saves_one_conversation_turn(self, app_factory):
         response = make_response(answer="This question cannot be answered.", refused=True, result=None)
         client = app_factory(lambda *_a, **_k: response).test_client()
-        ask(client)
-        records = history_repository.list_history()
-        assert len(records) == 1
-        assert records[0].refused is True
+        payload = ask(client).get_json()
 
-    def test_empty_result_saves_one_record(self, app_factory):
+        conversation = load_saved_conversation(client, payload["conversation_id"])
+        assistant = conversation["messages"][-1]
+        assert [message["role"] for message in conversation["messages"]] == ["user", "assistant"]
+        assert assistant["meta"]["refused"] is True
+        assert assistant["row_count"] is None
+        assert assistant["chart"]["url"] is None
+
+    def test_empty_result_saves_row_metadata_but_not_result_rows(self, app_factory):
         empty = make_result(pd.DataFrame(columns=["region", "deals"]))
         client = app_factory(lambda *_a, **_k: make_response(result=empty)).test_client()
-        ask(client)
-        records = history_repository.list_history()
-        assert len(records) == 1
-        assert records[0].row_count == 0
+        payload = ask(client).get_json()
 
-    def test_answer_fallback_saves_one_record(self, app_factory):
-        response = make_response(answer=None, answer_fallback_used=True,
-                                 answer_error=RuntimeError("provider down"))
+        assistant = load_saved_conversation(client, payload["conversation_id"])["messages"][-1]
+        assert assistant["row_count"] == 0
+        assert "columns" not in assistant
+        assert "rows" not in assistant
+
+    def test_answer_fallback_saves_one_conversation_turn(self, app_factory):
+        response = make_response(
+            answer=None,
+            answer_fallback_used=True,
+            answer_error=RuntimeError("provider down"),
+        )
         client = app_factory(lambda *_a, **_k: response).test_client()
-        ask(client)
-        records = history_repository.list_history()
-        assert len(records) == 1
-        assert records[0].answer_fallback_used is True
-        assert records[0].success is False
+        payload = ask(client).get_json()
 
-    def test_chart_failure_still_saves_history(self, app_factory):
+        assistant = load_saved_conversation(client, payload["conversation_id"])["messages"][-1]
+        assert assistant["content"] == "The answer could not be generated. The returned data is shown below."
+        assert assistant["meta"]["answer_fallback_used"] is True
+        assert assistant["meta"]["success"] is False
+
+    def test_chart_failure_still_saves_a_safe_conversation_message(self, app_factory):
         response = make_response(chart_requested=True, chart_error="nothing to chart")
         client = app_factory(lambda *_a, **_k: response).test_client()
-        ask(client)
-        record = history_repository.list_history()[0]
-        assert record.error_code == "chart_failed"
-        assert record.chart_filename is None
+        payload = ask(client).get_json()
 
-    def test_chart_success_stores_only_the_filename(self, app_factory):
+        assistant = load_saved_conversation(client, payload["conversation_id"])["messages"][-1]
+        assert assistant["chart"] == {
+            "requested": True,
+            "type": None,
+            "url": None,
+            "note": None,
+            "available": False,
+        }
+        assert "error_code" not in assistant
+
+    def test_chart_success_exposes_only_a_safe_historic_chart_url(self, app_factory):
         chart = app_factory.charts_dir / "generated.png"
         chart.write_bytes(PNG_SIGNATURE)
         response = make_response(chart_requested=True, chart_path=chart, chart_type=ChartType.BAR)
         client = app_factory(lambda *_a, **_k: response).test_client()
-        ask(client)
-        record = history_repository.list_history()[0]
-        assert record.chart_filename == "generated.png"
-        assert "\\" not in (record.chart_filename or "")
+        payload = ask(client).get_json()
+
+        detail_response = client.get(f"/api/conversations/{payload['conversation_id']}")
+        assistant = detail_response.get_json()["conversation"]["messages"][-1]
+        assert assistant["chart"]["available"] is True
+        assert assistant["chart"]["url"] == "/charts/generated.png"
+        assert str(chart.parent) not in detail_response.get_data(as_text=True)
 
     @pytest.mark.parametrize(
         "payload",
@@ -323,7 +357,7 @@ class TestQueryPersistence:
     def test_validation_failures_save_nothing(self, app_factory, payload):
         client = app_factory(lambda *_a, **_k: make_response()).test_client()
         assert client.post("/api/query", json=payload).status_code == 400
-        assert history_repository.list_history() == []
+        assert client.get("/api/conversations").get_json() == {"ok": True, "conversations": []}
 
     def test_processor_exception_saves_nothing(self, app_factory):
         def boom(*_a, **_k):
@@ -331,7 +365,7 @@ class TestQueryPersistence:
 
         client = app_factory(boom).test_client()
         assert ask(client).status_code == 503
-        assert history_repository.list_history() == []
+        assert client.get("/api/conversations").get_json() == {"ok": True, "conversations": []}
 
     def test_sql_refusal_saves_nothing(self, app_factory):
         def boom(*_a, **_k):
@@ -339,42 +373,47 @@ class TestQueryPersistence:
 
         client = app_factory(boom).test_client()
         assert ask(client).status_code == 400
-        assert history_repository.list_history() == []
+        assert client.get("/api/conversations").get_json() == {"ok": True, "conversations": []}
 
     def test_non_analytics_routes_save_nothing(self, app_factory):
         client = app_factory(lambda *_a, **_k: make_response()).test_client()
         client.get("/")
         client.get("/api/status")
         client.get("/api/history")
+        client.get("/api/conversations")
         client.get("/static/js/app.js")
-        assert history_repository.list_history() == []
+        assert client.get("/api/conversations").get_json() == {"ok": True, "conversations": []}
 
-    def test_history_is_not_part_of_the_query_payload(self, app_factory):
+    def test_conversation_transcript_is_not_part_of_the_query_payload(self, app_factory):
         client = app_factory(lambda *_a, **_k: make_response()).test_client()
-        assert "history" not in ask(client).get_json()
+        payload = ask(client).get_json()
+        assert "history" not in payload
+        assert "messages" not in payload
 
 
 class TestPersistenceFailureIsNonFatal:
     def test_analysis_still_succeeds(self, app_factory, monkeypatch):
-        def boom(**_kwargs):
-            raise RuntimeError("history disk failure")
+        def boom(*_args, **_kwargs):
+            raise RuntimeError("conversation disk failure")
 
-        monkeypatch.setattr(history_repository, "save_history", boom)
+        monkeypatch.setattr(history_repository, "save_conversation_turn", boom)
         client = app_factory(lambda *_a, **_k: make_response()).test_client()
         response = ask(client)
         payload = response.get_json()
 
         assert response.status_code == 200
         assert payload["ok"] is True
-        assert payload["history_saved"] is False
+        assert payload["conversation_saved"] is False
+        assert payload["conversation_id"] is None
         assert payload["answer"] == "NA has the highest win rate."
-        assert "history disk failure" not in response.get_data(as_text=True)
+        assert "conversation disk failure" not in response.get_data(as_text=True)
+        assert client.get("/api/conversations").get_json() == {"ok": True, "conversations": []}
 
     def test_no_second_execution_or_extra_model_call(self, app_factory, monkeypatch):
-        def boom(**_kwargs):
-            raise RuntimeError("history failure")
+        def boom(*_args, **_kwargs):
+            raise RuntimeError("conversation failure")
 
-        monkeypatch.setattr(history_repository, "save_history", boom)
+        monkeypatch.setattr(history_repository, "save_conversation_turn", boom)
         calls = []
 
         def processor(*args, **kwargs):
@@ -423,19 +462,22 @@ class TestChartHttpIntegration:
         assert str(path.parent) not in body
         assert "C:\\" not in body
 
-    def test_saved_history_serves_the_same_chart_without_regenerating(self, real_chart_response):
+    def test_saved_conversation_message_serves_the_same_chart_without_regenerating(
+        self, real_chart_response
+    ):
         factory, response, path = real_chart_response
         client = factory(lambda *_a, **_k: response).test_client()
-        ask(client)
+        query_payload = ask(client).get_json()
 
-        # Reading history must not create another PNG.
+        # Reading a historic conversation message must not create another PNG.
         before = sorted(p.name for p in factory.charts_dir.glob("*.png"))
-        entry = client.get("/api/history").get_json()["history"][0]
+        conversation = load_saved_conversation(client, query_payload["conversation_id"])
         after = sorted(p.name for p in factory.charts_dir.glob("*.png"))
+        assistant = conversation["messages"][-1]
 
         assert before == after
-        assert entry["chart"]["available"] is True
-        assert client.get(entry["chart"]["url"]).status_code == 200
+        assert assistant["chart"]["available"] is True
+        assert client.get(assistant["chart"]["url"]).status_code == 200
 
     @pytest.mark.parametrize(
         "bad",

@@ -15,6 +15,7 @@ __pycache__/
 *.py[cod]
 *.pyo
 .pytest_cache/
+.test-tmp/
 
 # Local databases. The container keeps its own under docker-data/, which is
 # bind-mounted at runtime, so these must not be baked into the image.

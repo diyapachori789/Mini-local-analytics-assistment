@@ -156,7 +156,7 @@ class TestMissingIdentifierDetection:
 
 
 class TestGenerationSafeguard:
-    """A dropped identifier triggers one bounded retry, then a refusal."""
+    """A dropped identifier is refused without spending a second model call."""
 
     def _client(self, monkeypatch, responses):
         calls = []
@@ -195,23 +195,22 @@ class TestGenerationSafeguard:
         assert "OPP-1003" in sql and "OPP-1014" in sql
         assert len(calls) == 1, "a complete statement must not be regenerated"
 
-    def test_dropped_identifier_triggers_one_retry_that_can_succeed(self, monkeypatch):
+    def test_dropped_identifier_is_refused_without_a_corrective_call(self, monkeypatch):
         bad = "SELECT opportunity_id, amount FROM opportunities WHERE opportunity_id = 'OPP-1003';"
         good = "SELECT opportunity_id, amount FROM opportunities WHERE opportunity_id IN ('OPP-1003', 'OPP-1014');"
         calls = self._client(monkeypatch, [bad, good])
 
-        sql = llm.generate_sql("compare OPP-1003 to OPP-1014")
-        assert "OPP-1014" in sql
-        assert len(calls) == 2, "exactly one corrective retry"
-        assert "OPP-1014" in calls[1]["messages"][1]["content"]
+        with pytest.raises(ValueError, match="OPP-1014"):
+            llm.generate_sql("compare OPP-1003 to OPP-1014")
+        assert len(calls) == 1, "the answer stage must retain the second-call budget"
 
-    def test_persistent_omission_refuses_rather_than_running(self, monkeypatch):
+    def test_an_incomplete_plan_never_runs_even_if_repeated(self, monkeypatch):
         bad = "SELECT opportunity_id, amount FROM opportunities WHERE opportunity_id = 'OPP-1003';"
         calls = self._client(monkeypatch, [bad, bad])
 
         with pytest.raises(ValueError, match="OPP-1014"):
             llm.generate_sql("compare OPP-1003 to OPP-1014")
-        assert len(calls) == 2, "the retry is bounded at one"
+        assert len(calls) == 1
 
     def test_single_id_lookup_is_unaffected(self, monkeypatch):
         good = "SELECT opportunity_id, amount FROM opportunities WHERE opportunity_id = 'OPP-1003';"

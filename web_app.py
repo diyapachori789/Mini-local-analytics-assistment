@@ -7,6 +7,7 @@ serializes only the safe portions of that response.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import math
 import re
@@ -23,6 +24,7 @@ from flask import Flask, Response, jsonify, render_template, request, send_from_
 from analytics_service import AnalysisResponse, adapt_question_for_chart, process_question
 from config import (
     CHARTS_DIR,
+    CONVERSATION_DEFAULT_LIMIT,
     GROQ_API_KEY,
     HISTORY_DEFAULT_LIMIT,
     HISTORY_MAX_LIMIT,
@@ -41,6 +43,7 @@ from database import (
     close_connection,
     initialize_database,
 )
+from intent import Intent
 import history_repository
 from llm import normalize_question
 from logging_config import setup_logging, setup_web_logging
@@ -187,7 +190,90 @@ def public_response(response: AnalysisResponse) -> dict[str, Any]:
             "answer_fallback_used": response.answer_fallback_used,
             "elapsed_seconds": round(response.elapsed_seconds, 3),
             "refused": response.refused,
+            "has_result": response.result is not None,
         },
+    }
+
+
+def _conversation_chart_payload(
+    *,
+    chart_requested: bool,
+    chart_type: Optional[str],
+    chart_filename: Optional[str],
+    chart_note: Optional[str],
+    charts_dir: Path,
+) -> dict[str, Any]:
+    """Build a safe, availability-checked chart object for a saved message."""
+    filename = history_repository.safe_chart_filename(chart_filename)
+    available = bool(filename) and _is_safe_chart_filename(filename, charts_dir)
+    return {
+        "requested": bool(chart_requested),
+        "type": chart_type if isinstance(chart_type, str) else None,
+        "url": f"/charts/{filename}" if available else None,
+        "note": chart_note if isinstance(chart_note, str) else None,
+        "available": available,
+    }
+
+
+def public_conversation_summary(
+    summary: history_repository.ConversationSummary,
+) -> dict[str, Any]:
+    """Serialize one safe sidebar entry without transcript text or internals."""
+    return {
+        "conversation_id": summary.conversation_id,
+        "title": summary.title,
+        "created_at": summary.created_at.isoformat(),
+        "updated_at": summary.updated_at.isoformat(),
+        "message_count": summary.message_count,
+    }
+
+
+def public_conversation_message(
+    message: history_repository.ConversationMessage, charts_dir: Path
+) -> dict[str, Any]:
+    """Serialize a persisted message without query rows, SQL, or implementation data."""
+    return {
+        "id": message.message_id,
+        "role": message.role,
+        "content": message.content,
+        "created_at": message.created_at.isoformat(),
+        "row_count": message.row_count,
+        "truncated": message.truncated,
+        "chart": _conversation_chart_payload(
+            chart_requested=message.chart_requested,
+            chart_type=message.chart_type,
+            chart_filename=message.chart_filename,
+            chart_note=message.chart_note,
+            charts_dir=charts_dir,
+        ),
+        "meta": {
+            "answer_fallback_used": message.answer_fallback_used,
+            "refused": message.refused,
+            "success": message.success,
+            "has_result": message.row_count is not None,
+            "elapsed_ms": (
+                round(message.elapsed_seconds * 1000)
+                if message.elapsed_seconds is not None
+                else None
+            ),
+        },
+    }
+
+
+def public_conversation(
+    conversation: history_repository.Conversation, charts_dir: Path
+) -> dict[str, Any]:
+    """Serialize a read-only transcript; full result tables are intentionally absent."""
+    return {
+        "conversation_id": conversation.conversation_id,
+        "title": conversation.title,
+        "created_at": conversation.created_at.isoformat(),
+        "updated_at": conversation.updated_at.isoformat(),
+        "messages_truncated": conversation.messages_truncated,
+        "messages": [
+            public_conversation_message(message, charts_dir)
+            for message in conversation.messages
+        ],
     }
 
 
@@ -196,35 +282,34 @@ def _error_response(code: str, message: str, status: int) -> tuple[Response, int
     return jsonify({"ok": False, "error": {"code": code, "message": message}}), status
 
 
-def save_completed_history(response: AnalysisResponse) -> bool:
-    """Persist one completed analytics response. Never raises.
+def save_completed_conversation_turn(
+    conversation_id: Optional[str], response: AnalysisResponse
+) -> history_repository.ConversationSummary:
+    """Persist the completed browser turn without doing further analytics work.
 
-    Called only after the analytics workflow has finished, using values already
-    present on the response. It performs no query, no model call, and no chart
-    work, so a storage failure cannot cost the user their answer.
+    The repository writes the user/assistant pair in one transaction.  This is
+    deliberately after the shared analytics service returns: a persistence
+    problem cannot trigger a second SQL execution, chart pass, or model call.
     """
-    try:
-        history_repository.save_history(
-            original_question=response.original_question,
-            answer=response.answer,
-            row_count=response.result.row_count if response.result is not None else None,
-            truncated=bool(response.result.truncated) if response.result is not None else False,
-            max_rows=response.result.max_rows if response.result is not None else None,
-            chart_requested=response.chart_requested,
-            chart_type=response.chart_type.value if response.chart_type else None,
-            chart_filename=response.chart_path.name if response.chart_path else None,
-            chart_note=response.chart_note,
-            answer_fallback_used=response.answer_fallback_used,
-            refused=response.refused,
-            success=not response.answer_fallback_used,
-            elapsed_seconds=response.elapsed_seconds,
-            error_code="chart_failed" if response.chart_error else None,
-        )
-        return True
-    except Exception as exc:
-        # A history failure is reported as metadata, never as a request failure.
-        logger.error("History persistence failed for a completed analysis: %s", str(exc))
-        return False
+    result = response.result
+    answer = response.answer or "The answer could not be generated. The returned data is shown below."
+    return history_repository.save_conversation_turn(
+        conversation_id,
+        response.original_question,
+        answer,
+        row_count=result.row_count if result is not None else None,
+        truncated=bool(result.truncated) if result is not None else False,
+        max_rows=result.max_rows if result is not None else None,
+        chart_requested=response.chart_requested,
+        chart_type=response.chart_type.value if response.chart_type else None,
+        chart_filename=response.chart_path.name if response.chart_path else None,
+        chart_note=response.chart_note,
+        answer_fallback_used=response.answer_fallback_used,
+        refused=response.refused,
+        success=not response.answer_fallback_used,
+        elapsed_seconds=response.elapsed_seconds,
+        update_title=response.intent in (Intent.DATA_QUERY, Intent.DATA_EXPLANATION),
+    )
 
 
 def _history_chart_payload(record: history_repository.HistoryRecord, charts_dir: Path) -> dict[str, Any]:
@@ -280,13 +365,15 @@ def _parse_history_limit(raw_limit: Optional[str]) -> int:
     return limit
 
 
-def _parse_query_payload(payload: Any) -> tuple[str, bool, str]:
+def _parse_query_payload(payload: Any) -> tuple[str, bool, str, Optional[str]]:
     """Validate browser JSON and return its raw question and chart preferences."""
     if not isinstance(payload, dict):
         raise ApiRequestError("invalid_payload", "Send a JSON object with a question.")
-    allowed_fields = {"question", "chart_requested", "chart_type"}
+    allowed_fields = {"question", "chart_requested", "chart_type", "conversation_id"}
     if set(payload) - allowed_fields:
-        raise ApiRequestError("invalid_payload", "Send only question and chart preferences.")
+        raise ApiRequestError(
+            "invalid_payload", "Send only a question, chart preferences, and an optional conversation id."
+        )
 
     if "question" not in payload:
         raise ApiRequestError("missing_question", "Enter a business question to continue.")
@@ -315,7 +402,61 @@ def _parse_query_payload(payload: Any) -> tuple[str, bool, str]:
             "invalid_chart_type",
             "Choose auto, bar, line, pie, or scatter for the chart type.",
         )
-    return question, chart_requested, chart_type
+    conversation_id = payload.get("conversation_id")
+    if conversation_id is None:
+        return question, chart_requested, chart_type, None
+    try:
+        normalized_conversation_id = history_repository.normalize_conversation_id(conversation_id)
+    except history_repository.HistoryError as exc:
+        raise ApiRequestError("invalid_conversation", "The selected chat is invalid.") from exc
+    return question, chart_requested, chart_type, normalized_conversation_id
+
+
+def _parse_conversation_limit(raw_limit: Optional[str]) -> int:
+    """Validate a bounded conversation-list query parameter."""
+    if raw_limit is None or raw_limit == "":
+        return CONVERSATION_DEFAULT_LIMIT
+    if not re.fullmatch(r"[0-9]{1,4}", raw_limit):
+        raise ApiRequestError("invalid_limit", "The limit must be a whole number.")
+    limit = int(raw_limit)
+    if limit < 1 or limit > HISTORY_MAX_LIMIT:
+        raise ApiRequestError(
+            "invalid_limit", f"The limit must be between 1 and {HISTORY_MAX_LIMIT}."
+        )
+    return limit
+
+
+def _call_processor(
+    processor: Callable[..., AnalysisResponse],
+    effective_question: str,
+    original_question: str,
+    conversation_context: Optional[str],
+) -> AnalysisResponse:
+    """Invoke one processor once, retaining older two-argument test adapters.
+
+    Signature inspection happens before the single call.  We never catch and
+    retry ``TypeError`` because a real processor failure must remain a failure
+    rather than risk duplicate analytics work.
+    """
+    try:
+        signature = inspect.signature(processor)
+    except (TypeError, ValueError):
+        return processor(effective_question, original_question=original_question)
+
+    accepts_context = (
+        "conversation_context" in signature.parameters
+        or any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in signature.parameters.values()
+        )
+    )
+    if accepts_context:
+        return processor(
+            effective_question,
+            original_question=original_question,
+            conversation_context=conversation_context,
+        )
+    return processor(effective_question, original_question=original_question)
 
 
 def _is_safe_chart_filename(filename: str, charts_dir: Path) -> bool:
@@ -330,14 +471,16 @@ def _is_safe_chart_filename(filename: str, charts_dir: Path) -> bool:
 def create_app(
     *,
     process_question_func: Optional[Callable[..., AnalysisResponse]] = None,
-    history_saver: Optional[Callable[[AnalysisResponse], bool]] = None,
+    conversation_turn_saver: Optional[
+        Callable[[Optional[str], AnalysisResponse], history_repository.ConversationSummary]
+    ] = None,
     initialize_database_at_start: bool = False,
 ) -> Flask:
     """Create the local Flask application without initializing per request."""
     app = Flask(__name__)
     app.config["CHARTS_DIR"] = Path(CHARTS_DIR)
     processor = process_question_func or process_question
-    saver = history_saver or save_completed_history
+    turn_saver = conversation_turn_saver or save_completed_conversation_turn
     processing_lock = RLock()
     status = {
         "database": "Not initialized",
@@ -361,7 +504,10 @@ def create_app(
     app.extensions["analytics_processor"] = processor
     app.extensions["analytics_processing_lock"] = processing_lock
     app.extensions["analytics_status"] = status
-    app.extensions["history_saver"] = saver
+    app.extensions["conversation_turn_saver"] = turn_saver
+    # Kept solely for callers that explicitly inject the old adapter in tests or
+    # integrations. The browser itself now persists conversation turns, not a
+    # second flat record for every request.
 
     @app.after_request
     def add_security_headers(response: Response) -> Response:
@@ -386,7 +532,7 @@ def create_app(
 
         payload = request.get_json(silent=True)
         try:
-            question, chart_requested, chart_type = _parse_query_payload(payload)
+            question, chart_requested, chart_type, conversation_id = _parse_query_payload(payload)
             effective_question = adapt_question_for_chart(
                 question,
                 chart_requested=chart_requested,
@@ -397,12 +543,34 @@ def create_app(
         except ValueError:
             return _error_response("invalid_question", "Enter a business question to continue.", 400)
 
-        logger.info("Web analytics request started (chart_requested=%s).", chart_requested)
+        conversation_context: Optional[str] = None
+        if conversation_id is not None:
+            # Validate existence and obtain only a bounded safe transcript before
+            # entering the analytics lock. A missing/invalid chat never reaches
+            # Groq or the analytical database.
+            try:
+                selected = history_repository.load_conversation(conversation_id, limit=1)
+                if selected is None:
+                    return _error_response("conversation_not_found", "The selected chat was not found.", 404)
+                conversation_context = history_repository.get_conversation_context(conversation_id)
+            except history_repository.HistoryError:
+                logger.error("Conversation context could not be loaded for a web request.")
+                return _error_response(
+                    "conversation_unavailable", "Saved chats are unavailable right now.", 503
+                )
+
+        logger.info(
+            "Web analytics request started (chart_requested=%s, has_conversation=%s).",
+            chart_requested,
+            conversation_id is not None,
+        )
         try:
             with app.extensions["analytics_processing_lock"]:
-                response = app.extensions["analytics_processor"](
+                response = _call_processor(
+                    app.extensions["analytics_processor"],
                     effective_question,
-                    original_question=question,
+                    question,
+                    conversation_context,
                 )
         except SqlValidationError:
             logger.warning("Web analytics request was refused by SQL validation.")
@@ -443,15 +611,128 @@ def create_app(
             response.answer_fallback_used,
         )
 
-        # Exactly one history record per completed analytics response, written
-        # from the finished response only.
-        history_saved = app.extensions["history_saver"](response)
-        if not history_saved:
-            logger.warning("History was not persisted for a completed analytics response.")
+        # Persist the completed pair only after the shared analytics workflow has
+        # finished. A failure returns this answer and never reruns the request.
+        saved_conversation: Optional[history_repository.ConversationSummary] = None
+        try:
+            saved_conversation = app.extensions["conversation_turn_saver"](
+                conversation_id, response
+            )
+            conversation_saved = True
+        except Exception as exc:
+            logger.error("Conversation persistence failed for a completed analysis: %s", str(exc))
+            conversation_saved = False
+
+        # One authoritative write per browser turn. A second, injectable saver
+        # used to sit here; nothing supplied it, and leaving it in place meant a
+        # caller could write the same turn down two different paths.
+        history_saved = conversation_saved
+        if not conversation_saved:
+            logger.warning("Conversation was not persisted for a completed analytics response.")
 
         payload = public_response(response)
         payload["history_saved"] = history_saved
+        payload["conversation_saved"] = conversation_saved
+        payload["conversation_id"] = (
+            saved_conversation.conversation_id
+            if saved_conversation is not None
+            else conversation_id
+        )
         return jsonify(payload)
+
+    @app.get("/api/conversations")
+    def api_conversations() -> tuple[Response, int] | Response:
+        """List safe chat summaries only; never run analytics or a model."""
+        try:
+            limit = _parse_conversation_limit(request.args.get("limit"))
+        except ApiRequestError as exc:
+            return _error_response(exc.code, exc.message, 400)
+        if set(request.args) - {"limit"}:
+            return _error_response("invalid_query", "Only a limit parameter is supported.", 400)
+
+        try:
+            conversations = history_repository.list_conversations(limit)
+        except Exception:
+            logger.exception("Unable to list saved conversations.")
+            return _error_response("conversation_unavailable", "Saved chats are unavailable.", 503)
+        return jsonify(
+            {
+                "ok": True,
+                "conversations": [
+                    public_conversation_summary(conversation)
+                    for conversation in conversations
+                ],
+            }
+        )
+
+    @app.post("/api/conversations")
+    def api_create_conversation() -> tuple[Response, int] | Response:
+        """Create a blank persisted chat without invoking analytics."""
+        if request.data:
+            if not request.is_json:
+                return _error_response("invalid_payload", "Send a JSON request body.", 400)
+            payload = request.get_json(silent=True)
+            if not isinstance(payload, dict) or payload:
+                return _error_response("invalid_payload", "A new chat does not need request fields.", 400)
+        try:
+            conversation = history_repository.create_conversation()
+        except Exception:
+            logger.exception("Unable to create a conversation.")
+            return _error_response("conversation_unavailable", "A new chat could not be created.", 503)
+        logger.info("Conversation created through the web interface (id=%s).", conversation.conversation_id)
+        return jsonify({"ok": True, "conversation": public_conversation_summary(conversation)}), 201
+
+    @app.get("/api/conversations/<conversation_id>")
+    def api_conversation_detail(conversation_id: str) -> tuple[Response, int] | Response:
+        """Load persisted message summaries only; never replay analytics."""
+        try:
+            normalized_id = history_repository.normalize_conversation_id(conversation_id)
+        except history_repository.HistoryError:
+            return _error_response("invalid_conversation", "The selected chat is invalid.", 400)
+        try:
+            conversation = history_repository.load_conversation(normalized_id)
+        except Exception:
+            logger.exception("Unable to load a conversation.")
+            return _error_response("conversation_unavailable", "Saved chats are unavailable.", 503)
+        if conversation is None:
+            return _error_response("conversation_not_found", "The selected chat was not found.", 404)
+        logger.info("Conversation loaded through the web interface (id=%s).", conversation.conversation_id)
+        return jsonify(
+            {
+                "ok": True,
+                "conversation": public_conversation(conversation, Path(app.config["CHARTS_DIR"])),
+            }
+        )
+
+    @app.delete("/api/conversations/<conversation_id>")
+    def api_delete_conversation(conversation_id: str) -> tuple[Response, int] | Response:
+        """Delete one conversation's messages only; never remove chart files."""
+        try:
+            normalized_id = history_repository.normalize_conversation_id(conversation_id)
+        except history_repository.HistoryError:
+            return _error_response("invalid_conversation", "The selected chat is invalid.", 400)
+        try:
+            deleted = history_repository.delete_conversation(normalized_id)
+        except Exception:
+            logger.exception("Unable to delete a conversation.")
+            return _error_response("conversation_unavailable", "The selected chat could not be deleted.", 503)
+        if not deleted:
+            return _error_response("conversation_not_found", "The selected chat was not found.", 404)
+        logger.info("Conversation deleted through the web interface.")
+        return jsonify({"ok": True, "deleted": 1})
+
+    @app.delete("/api/conversations")
+    def api_delete_all_conversations() -> tuple[Response, int] | Response:
+        """Delete all persisted chats, never analytics data, charts, or logs."""
+        if request.args:
+            return _error_response("invalid_query", "This request does not accept query parameters.", 400)
+        try:
+            deleted = history_repository.delete_all_conversations()
+        except Exception:
+            logger.exception("Unable to delete saved conversations.")
+            return _error_response("conversation_unavailable", "Saved chats could not be deleted.", 503)
+        logger.info("All saved conversations deleted through the web interface (%s).", deleted)
+        return jsonify({"ok": True, "deleted": deleted})
 
     @app.get("/api/history")
     def api_history() -> tuple[Response, int] | Response:

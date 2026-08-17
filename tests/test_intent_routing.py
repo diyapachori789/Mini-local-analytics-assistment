@@ -21,12 +21,12 @@ import pytest
 
 import analytics_service
 import database
-import history_repository
 import intent as intent_module
 import llm
 import refusal
 import sql_guard
 import web_app
+from config import CONVERSATION_CONTEXT_MAX_CHARS
 from database import QueryResult, SqlValidationError
 from intent import ANSWERABLE, Intent, QueryPlan, parse_plan
 
@@ -48,9 +48,9 @@ REGION_ROWS = make_result(
 )
 
 
-def plan_reply(intent: str, sql: str | None) -> str:
+def plan_reply(intent: str, sql: str | None, response: str | None = None) -> str:
     """The literal JSON text the first call is expected to produce."""
-    return json.dumps({"intent": intent, "sql": sql})
+    return json.dumps({"intent": intent, "sql": sql, "response": response})
 
 
 class ScriptedClient:
@@ -75,6 +75,8 @@ class ScriptedClient:
         system = kwargs["messages"][0]["content"]
         if "routing and SQL layer" in system:
             stage, content = "route", self.route
+        elif "You are Analytics Assistant" in system:
+            stage, content = "conversation", self.answer
         elif "what a\nmeasure in their sales-opportunity data means" in system:
             stage, content = "conceptual", self.answer
         else:
@@ -341,15 +343,112 @@ class TestRefusingIntents:
         assert response.refused is True
         assert response.answer in refusal._TEMPLATES[refusal.RefusalCategory.NEEDS_CONTEXT]
 
-    def test_a_follow_up_reply_does_not_pretend_to_remember(self, scripted):
-        """No conversation memory exists, so none may be implied."""
+    def test_a_follow_up_reply_asks_for_a_neutral_clarification(self, scripted):
+        """A context-free follow-up prompts for details without memory claims."""
         for template in refusal._TEMPLATES[refusal.RefusalCategory.NEEDS_CONTEXT]:
-            assert "don't" in template.lower() or "not" in template.lower()
-            assert "remember" not in template.lower()
+            normalized = template.lower()
+            assert any(word in normalized for word in ("detail", "clearer", "name", "ask"))
 
 
 # ---------------------------------------------------------------------------
-# 6, 7, 8. Execution counts per route
+# 6. Conversation context stays in planning, never becomes result evidence
+# ---------------------------------------------------------------------------
+
+
+class TestConversationContextRouting:
+    def test_bounded_context_reaches_only_the_context_aware_planner(self):
+        previous_result = make_result(
+            pd.DataFrame({"region": ["NA"], "opportunity_count": [80]})
+        )
+        fresh_result = make_result(
+            pd.DataFrame({"region": ["EMEA"], "opportunity_count": [74]})
+        )
+        context = (
+            "USER: Show opportunity count by region.\n"
+            "ASSISTANT: NA had 80 opportunities in the prior answer."
+        )
+        planner_calls: list[tuple[str, str | None]] = []
+        query_calls: list[str] = []
+        answer_calls: list[tuple[str, QueryResult]] = []
+
+        assert len(context) <= CONVERSATION_CONTEXT_MAX_CHARS
+        assert fresh_result is not previous_result
+
+        def context_aware_planner(
+            question: str, *, conversation_context: str | None = None
+        ) -> QueryPlan:
+            planner_calls.append((question, conversation_context))
+            return QueryPlan(Intent.DATA_QUERY, GROUPED_SQL)
+
+        def query_runner(sql: str) -> QueryResult:
+            query_calls.append(sql)
+            return fresh_result
+
+        # Its two-argument signature is intentional: historical orientation is
+        # not an answer-stage input and cannot replace a fresh query result.
+        def answer_generator(question: str, result: QueryResult) -> str:
+            answer_calls.append((question, result))
+            return "EMEA has 74 opportunities in the newly retrieved result."
+
+        response = analytics_service.process_question(
+            "What about EMEA?",
+            conversation_context=context,
+            plan_generator=context_aware_planner,
+            query_runner=query_runner,
+            answer_generator=answer_generator,
+            query_logger=lambda *_args: None,
+        )
+
+        assert planner_calls == [("What about EMEA?", context)]
+        assert query_calls == [GROUPED_SQL]
+        assert response.result is fresh_result
+        assert answer_calls == [("What about EMEA?", fresh_result)]
+
+    def test_structure_gate_rejects_current_question_before_context_reaches_planner(self):
+        planner_calls: list[tuple[str, str | None]] = []
+
+        def context_aware_planner(
+            question: str, *, conversation_context: str | None = None
+        ) -> QueryPlan:
+            planner_calls.append((question, conversation_context))
+            pytest.fail("A structure request must be refused before planning.")
+
+        response = analytics_service.process_question(
+            "Show database schema.",
+            conversation_context="USER: Earlier we discussed regional opportunity counts.",
+            plan_generator=context_aware_planner,
+            query_runner=lambda _sql: pytest.fail("must not execute"),
+            answer_generator=lambda _question, _result: pytest.fail("must not answer"),
+            query_logger=lambda *_args: None,
+        )
+
+        assert response.refused is True
+        assert response.intent is Intent.UNSAFE
+        assert response.result is None
+        assert planner_calls == []
+
+    def test_direct_planner_context_filter_omits_windows_paths(self):
+        safe_context = llm._safe_conversation_context(
+            "USER: Compare regional win rates.\n"
+            "ASSISTANT: See C:\\Users\\analyst\\private.csv for internal notes.\n"
+            "ASSISTANT: Authorization: Bearer bearer_value_12345.\n"
+            "ASSISTANT: OPENAI_API_KEY=provider_secret_67890.\n"
+            "ASSISTANT: See /root/.env and /opt/private.txt."
+        )
+
+        assert "Compare regional win rates" in safe_context
+        assert "C:\\Users\\analyst" not in safe_context
+        for forbidden in (
+            "bearer_value_12345",
+            "provider_secret_67890",
+            "/root/.env",
+            "/opt/private.txt",
+        ):
+            assert forbidden not in safe_context
+
+
+# ---------------------------------------------------------------------------
+# 7, 8, 9. Execution counts per route
 # ---------------------------------------------------------------------------
 
 
@@ -573,6 +672,13 @@ class TestCallBudget:
             (plan_reply("DATA_QUERY", GROUPED_SQL), ["route", "answer"]),
             (plan_reply("DATA_EXPLANATION", GROUPED_SQL), ["route", "answer"]),
             (plan_reply("DATA_EXPLANATION", None), ["route", "conceptual"]),
+            (
+                plan_reply(
+                    "GENERAL_CONVERSATION",
+                    None,
+                ),
+                ["route", "conversation"],
+            ),
             (plan_reply("UNSUPPORTED", None), ["route"]),
             (plan_reply("UNSAFE", None), ["route"]),
             (plan_reply("INSUFFICIENT_CONTEXT", None), ["route"]),
@@ -598,21 +704,22 @@ class TestCallBudget:
 
 
 # ---------------------------------------------------------------------------
-# 12. History semantics
+# 13. Conversation persistence semantics
 # ---------------------------------------------------------------------------
 
 
-class TestHistorySemantics:
+class TestConversationPersistenceSemantics:
     @pytest.fixture
     def client(self, monkeypatch, tmp_path):
         charts = tmp_path / "charts"
         charts.mkdir()
         monkeypatch.setattr(web_app, "CHARTS_DIR", charts, raising=False)
 
-        def processor(question, original_question=None):
+        def processor(question, original_question=None, conversation_context=None):
             return analytics_service.process_question(
                 question,
                 original_question=original_question,
+                conversation_context=conversation_context,
                 plan_generator=lambda q: parse_plan(GROUPED_SQL),
                 query_runner=lambda sql: REGION_ROWS,
                 answer_generator=lambda q, r: "NA leads on opportunity count.",
@@ -623,11 +730,17 @@ class TestHistorySemantics:
         application.config.update(TESTING=True, CHARTS_DIR=charts)
         return application.test_client()
 
-    def test_an_explanatory_answer_is_persisted(self, client):
-        client.post("/api/query", json={"question": "why is one region ahead?"})
-        record = history_repository.list_history()[0]
-        assert record.original_question == "why is one region ahead?"
-        assert record.answer == "NA leads on opportunity count."
+    def test_an_explanatory_answer_is_persisted_in_a_conversation(self, client):
+        response = client.post("/api/query", json={"question": "why is one region ahead?"})
+        payload = response.get_json()
+
+        assert response.status_code == 200
+        assert payload["conversation_saved"] is True
+        detail = client.get(f"/api/conversations/{payload['conversation_id']}").get_json()
+        messages = detail["conversation"]["messages"]
+        assert [message["role"] for message in messages] == ["user", "assistant"]
+        assert messages[0]["content"] == "why is one region ahead?"
+        assert messages[1]["content"] == "NA leads on opportunity count."
 
     def test_no_intent_label_reaches_the_browser(self, client):
         body = client.post(
@@ -637,9 +750,13 @@ class TestHistorySemantics:
             assert label not in body
         assert "intent" not in body.lower()
 
-    def test_history_still_hides_sql(self, client):
-        client.post("/api/query", json={"question": "why is one region ahead?"})
-        body = client.get("/api/history").get_data(as_text=True)
+    def test_saved_conversation_still_hides_sql(self, client):
+        payload = client.post(
+            "/api/query", json={"question": "why is one region ahead?"}
+        ).get_json()
+        body = client.get(f"/api/conversations/{payload['conversation_id']}").get_data(
+            as_text=True
+        )
         assert "SELECT" not in body
         assert "opportunity_count FROM" not in body
 
@@ -671,6 +788,7 @@ class TestPlanParsing:
             ("analytics_query", Intent.DATA_QUERY),
             ("conceptual_analytics", Intent.DATA_EXPLANATION),
             ("Data Explanation", Intent.DATA_EXPLANATION),
+            ("conversation", Intent.GENERAL_CONVERSATION),
             ("out_of_scope", Intent.UNSUPPORTED),
             ("unsafe_sql", Intent.UNSAFE),
         ],
@@ -683,6 +801,29 @@ class TestPlanParsing:
         """A relabelled reply must not lose a perfectly good query."""
         plan = parse_plan(plan_reply("something_new", GROUPED_SQL))
         assert plan.intent is Intent.DATA_QUERY and plan.sql == GROUPED_SQL
+
+    def test_a_conversation_route_never_retains_sql(self):
+        plan = parse_plan(
+            plan_reply(
+                "GENERAL_CONVERSATION",
+                "SELECT 1;",
+            )
+        )
+        assert plan.intent is Intent.GENERAL_CONVERSATION
+        assert plan.sql is None
+
+    @pytest.mark.parametrize(
+        "unsafe_response",
+        [
+            "```sql SELECT * FROM opportunities```",
+            "DATA_QUERY",
+            "Use API_KEY=not-a-real-secret-value",
+            "Read C:/private/config.txt",
+            "The current total is 300.",
+        ],
+    )
+    def test_an_unsafe_conversation_reply_is_not_exposed(self, unsafe_response):
+        assert intent_module.safe_conversation_response(unsafe_response) is None
 
     @pytest.mark.parametrize("junk", ["", "   ", "not json and not sql", None, "{", "[]"])
     def test_unintelligible_output_refuses_instead_of_raising(self, junk):

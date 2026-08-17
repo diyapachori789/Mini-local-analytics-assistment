@@ -1,90 +1,90 @@
 (function () {
   "use strict";
 
-  // Browser storage holds display preferences only. Query history is owned by
-  // the backend so it survives refreshes, restarts, and cleared site data.
+  // Browser storage intentionally holds display preferences only. Saved chats
+  // are owned by the local backend, not copied into the browser.
   const STORAGE_KEYS = Object.freeze({
     theme: "mini-local-analytics.theme",
     view: "mini-local-analytics.view",
   });
   const LEGACY_HISTORY_KEY = "mini-local-analytics.history";
-  const HISTORY_LIMIT = 50;
   const CHART_TYPES = new Set(["auto", "bar", "line", "pie", "scatter"]);
-  const VIEWS = new Set(["ask", "history", "charts", "about"]);
+  const VIEWS = new Set(["chat", "about"]);
+  const CONVERSATION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+  const MAX_CONVERSATIONS = 100;
+  const MAX_MESSAGE_CHARS = 12000;
+  const MAX_TITLE_CHARS = 180;
 
+  let activeConversationId = null;
+  let conversations = [];
+  let dataPanelSequence = 0;
+  let initialConversationLoadPending = true;
+  let initialConversationRestorePending = true;
+  let isConversationAction = false;
   let isSubmitting = false;
-  let savedHistory = [];
+  let attachedImageName = null;
+  let attachedImageUrl = null;
   let ui;
 
   function initialize() {
     ui = {
-      answerText: document.getElementById("answer-text"),
-      answerWarning: document.getElementById("answer-warning"),
-      askedBlock: document.getElementById("asked-block"),
-      askedQuestion: document.getElementById("asked-question"),
+      activeConversationTitle: document.getElementById("conversation-heading"),
       askButton: document.getElementById("ask-button"),
-      chartEmpty: document.getElementById("chart-empty"),
-      chartFigure: document.getElementById("chart-figure"),
-      chartImage: document.getElementById("chart-image"),
-      chartMessage: document.getElementById("chart-message"),
-      chartNote: document.getElementById("chart-note"),
-      chartRequested: document.getElementById("chart-requested"),
-      chartType: document.getElementById("chart-type"),
-      chartTypeBadge: document.getElementById("chart-type-badge"),
-      chartsEmpty: document.getElementById("charts-empty"),
-      chartGallery: document.getElementById("chart-gallery"),
-      clearButtons: Array.from(document.querySelectorAll("[data-clear-session]")),
-      clearHistoryButtons: Array.from(document.querySelectorAll("[data-clear-history]")),
-      exampleButtons: Array.from(document.querySelectorAll("[data-example-question]")),
+      attachmentChip: document.getElementById("attachment-chip"),
+      attachmentName: document.getElementById("attachment-name"),
+      attachmentRemove: document.getElementById("attachment-remove"),
+      attachmentThumb: document.getElementById("attachment-thumb"),
+      imageInput: document.getElementById("image-input"),
+      chartShortcut: document.querySelector("[data-chart-shortcut]"),
+      conversationList: document.getElementById("conversation-list"),
+      conversationListEmpty: document.getElementById("conversation-list-empty"),
+      conversationMeta: document.getElementById("conversation-meta"),
+      conversationStream: document.getElementById("conversation-stream"),
+      deleteAllButton: document.querySelector("[data-delete-all-conversations]"),
       form: document.getElementById("query-form"),
-      historyEmpty: document.getElementById("history-empty"),
-      historyList: document.getElementById("history-list"),
       liveRegion: document.getElementById("live-region"),
       navButtons: Array.from(document.querySelectorAll("[data-view-target]")),
       navToggle: document.getElementById("nav-toggle"),
+      newChatButtons: Array.from(document.querySelectorAll("[data-new-chat]")),
       questionInput: document.getElementById("question-input"),
       questionMessage: document.getElementById("question-message"),
-      resultStatus: document.getElementById("result-status"),
-      resultsCard: document.getElementById("results-card"),
-      resultTableBody: document.getElementById("result-table-body"),
-      resultTableCaption: document.getElementById("result-table-caption"),
-      resultTableHead: document.getElementById("result-table-head"),
-      rowMeta: document.getElementById("row-meta"),
       sidebar: document.getElementById("sidebar"),
       sidebarBackdrop: document.getElementById("sidebar-backdrop"),
-      statusDot: document.getElementById("status-dot"),
-      statusList: document.getElementById("system-status-list"),
-      tableWrap: document.querySelector(".table-wrap"),
       themeIcon: document.querySelector(".theme-toggle-icon"),
       themeLabel: document.querySelector(".theme-toggle-label"),
       themeToggle: document.getElementById("theme-toggle"),
-      truncationNote: document.getElementById("truncation-note"),
-      emptyResult: document.getElementById("empty-result"),
       views: Array.from(document.querySelectorAll("[data-view]")),
     };
 
     applyTheme(readStoredTheme());
     bindEvents();
-    // Any history left by an earlier build is display data only and is no
-    // longer authoritative, so it is discarded rather than merged.
+    // Do not merge display-only data written by an earlier browser build into
+    // server-owned conversations.
     removeStoredValue(LEGACY_HISTORY_KEY);
-    renderHistory([]);
-    renderChartGallery();
+    renderNewConversation();
+    renderConversationList([]);
     activateView(readStoredView(), false);
-    loadStatus();
-    loadHistory();
+    closeNavigation();
+    loadConversations();
   }
 
   function bindEvents() {
     ui.form.addEventListener("submit", submitQuestion);
     ui.questionInput.addEventListener("keydown", submitOnEnter);
-    ui.chartRequested.addEventListener("change", updateChartControls);
+    ui.conversationStream.addEventListener("click", selectSuggestedQuestion);
+    ui.chartShortcut.addEventListener("click", showChartsInConversation);
     ui.themeToggle.addEventListener("click", toggleTheme);
     ui.navToggle.addEventListener("click", toggleNavigation);
     ui.sidebarBackdrop.addEventListener("click", closeNavigation);
-    ui.chartImage.addEventListener("error", showChartImageError);
+    document.addEventListener("click", closeConversationMenus);
+    ui.deleteAllButton.addEventListener("click", deleteAllConversations);
+    ui.imageInput.addEventListener("change", attachImage);
+    ui.attachmentRemove.addEventListener("click", clearAttachment);
 
     document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") {
+        closeConversationMenus();
+      }
       if (event.key === "Escape" && document.body.classList.contains("nav-open")) {
         closeNavigation();
         ui.navToggle.focus();
@@ -97,28 +97,92 @@
       });
     }
 
-    for (const button of ui.exampleButtons) {
-      button.addEventListener("click", function () {
-        const question = button.dataset.exampleQuestion;
-        if (typeof question !== "string") {
-          return;
-        }
-        ui.questionInput.value = question;
-        setQuestionMessage("Example added. Review it, then submit when ready.", "success");
-        activateView("ask", false);
-        ui.questionInput.focus();
-      });
-    }
-
-    for (const button of ui.clearButtons) {
-      button.addEventListener("click", clearSession);
-    }
-
-    for (const button of ui.clearHistoryButtons) {
-      button.addEventListener("click", clearSavedHistory);
+    for (const button of ui.newChatButtons) {
+      button.addEventListener("click", startNewConversation);
     }
 
     window.addEventListener("resize", closeNavigation);
+  }
+
+
+  // --- Image attachment -----------------------------------------------------
+  //
+  // Frontend only. There is no backend image understanding, so nothing is
+  // uploaded: the file stays in the browser and the composer refuses to send
+  // while one is attached. The alternative - accepting the file and quietly
+  // analysing only the text - would look like support that does not exist.
+
+  const ALLOWED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
+
+  function attachImage(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) {
+      clearAttachment();
+      return;
+    }
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+      clearAttachment();
+      setQuestionMessage("Choose a PNG, JPEG or WebP image.", "error");
+      announce("That file type is not supported.");
+      return;
+    }
+
+    attachedImageName = file.name;
+    // Set as text, never as markup: the filename is user-controlled.
+    ui.attachmentName.textContent = file.name;
+
+    if (attachedImageUrl !== null) {
+      URL.revokeObjectURL(attachedImageUrl);
+    }
+    attachedImageUrl = URL.createObjectURL(file);
+    ui.attachmentThumb.src = attachedImageUrl;
+    ui.attachmentChip.hidden = false;
+
+    setQuestionMessage("Image analysis is not supported yet.", "");
+    announce("Image attached: " + file.name + ". Image analysis is not supported yet.");
+  }
+
+  function clearAttachment() {
+    attachedImageName = null;
+    if (attachedImageUrl !== null) {
+      URL.revokeObjectURL(attachedImageUrl);
+      attachedImageUrl = null;
+    }
+    ui.imageInput.value = "";
+    ui.attachmentThumb.removeAttribute("src");
+    ui.attachmentName.textContent = "";
+    ui.attachmentChip.hidden = true;
+    setQuestionMessage("", "");
+    ui.questionInput.focus();
+  }
+
+
+  function selectSuggestedQuestion(event) {
+    const button = event.target.closest("[data-example-question]");
+    if (!(button instanceof HTMLButtonElement) || !ui.conversationStream.contains(button)) {
+      return;
+    }
+    const question = button.dataset.exampleQuestion;
+    if (typeof question !== "string") {
+      return;
+    }
+    ui.questionInput.value = question;
+    setQuestionMessage("Suggestion added. Review it, then send when ready.", "success");
+    activateView("chat", false);
+    ui.questionInput.focus();
+  }
+
+  function showChartsInConversation() {
+    activateView("chat", false);
+    const chart = ui.conversationStream.querySelector(".message-chart");
+    if (chart === null) {
+      setQuestionMessage("Charts will appear inside assistant messages when they add value.", "");
+      announce("This chat does not contain a chart yet.");
+      return;
+    }
+    chart.scrollIntoView({ behavior: "smooth", block: "center" });
+    chart.focus({ preventScroll: true });
+    announce("Moved to the first chart in this chat.");
   }
 
   function submitOnEnter(event) {
@@ -133,65 +197,988 @@
     if (isSubmitting) {
       return;
     }
+    if (initialConversationLoadPending) {
+      setQuestionMessage("Loading your saved chats before sending a message...", "");
+      announce("Saved chats are still loading.");
+      return;
+    }
+
+    if (attachedImageName !== null) {
+      // The backend accepts a question, chart preferences and a conversation id
+      // and rejects anything else, so an attachment cannot be sent anywhere.
+      // Saying so beats dropping it silently.
+      setQuestionMessage(
+        "Image analysis is not supported yet. Remove the image to send your message.",
+        "error"
+      );
+      announce("Image analysis is not supported yet.");
+      ui.attachmentRemove.focus();
+      return;
+    }
 
     const question = ui.questionInput.value;
     if (question.trim().length === 0) {
-      setQuestionMessage("Enter a question before asking for an analysis.", "error");
-      announce("A question is required before submitting.");
+      setQuestionMessage("Enter a question before sending it.", "error");
+      announce("A question is required before sending.");
       ui.questionInput.focus();
       return;
     }
 
     const requestBody = {
       question,
-      chart_requested: ui.chartRequested.checked,
-      chart_type: selectedChartType(),
+      conversation_id: null,
     };
-
+    let pendingMessage = null;
     setSubmitting(true);
-    setQuestionMessage("Analyzing your question…", "");
-    announce("Your question is being analyzed.");
+    setQuestionMessage("Thinking...", "");
+    announce("Analytics Assistant is thinking.");
 
     try {
+      const conversationId = await ensureActiveConversation();
+      if (conversationId === null) {
+        return;
+      }
+
+      requestBody.conversation_id = conversationId;
+      pendingMessage = appendPendingTurn(question);
+      ui.questionInput.value = "";
+
       const response = await fetch("/api/query", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify(requestBody),
       });
       const payload = await readJson(response);
-
       if (!response.ok || !isRecord(payload) || payload.ok !== true) {
         throw new RequestFailure(getSafeErrorMessage(payload));
       }
 
-      renderResult(payload, question);
-      // The backend saved this request already. Reloading is the single source
-      // of truth and avoids inserting a duplicate entry locally.
-      loadHistory();
-      setQuestionMessage("Analysis complete.", "success");
-      announce("Analysis complete. The result has been updated.");
+      const returnedConversationId = safeConversationId(payload.conversation_id);
+      if (returnedConversationId !== null) {
+        activeConversationId = returnedConversationId;
+      }
+      replacePendingMessage(pendingMessage, createAssistantMessage(currentResponseMessage(payload, question)));
+      pendingMessage = null;
+      updateConversationHeaderForActive();
+      loadConversations();
+
+      if (payload.conversation_saved === false) {
+        setQuestionMessage("Response received, but this chat could not be saved.", "error");
+        announce("The response was received, but the chat could not be saved.");
+      } else {
+        setQuestionMessage("", "");
+        announce("The conversation was updated.");
+      }
     } catch (error) {
-      clearCurrentResult();
-      resetChart();
-      const message = error instanceof RequestFailure ? error.message : "The analysis could not be completed. Please try again later.";
+      const message = error instanceof RequestFailure
+        ? error.message
+        : "The response could not be completed. Please try again later.";
+      if (pendingMessage !== null) {
+        replacePendingMessage(pendingMessage, createFailedAssistantMessage(message));
+      }
       setQuestionMessage(message, "error");
-      announce("The analysis could not be completed.");
+      announce("The response could not be completed.");
     } finally {
       setSubmitting(false);
     }
   }
 
-  async function loadStatus() {
-    try {
-      const response = await fetch("/api/status", { headers: { Accept: "application/json" } });
-      const payload = await readJson(response);
-      if (!response.ok || !isRecord(payload) || payload.ok === false) {
-        throw new Error("Status unavailable");
-      }
-      renderStatus(payload);
-    } catch (_error) {
-      renderUnavailableStatus();
+  async function ensureActiveConversation() {
+    const current = safeConversationId(activeConversationId);
+    if (current !== null) {
+      return current;
     }
+    const conversation = await createConversation();
+    if (conversation === null) {
+      return null;
+    }
+    activeConversationId = conversation.id;
+    updateConversationHeader(conversation);
+    return conversation.id;
+  }
+
+  async function startNewConversation() {
+    if (isSubmitting || isConversationAction) {
+      return;
+    }
+    const conversation = await createConversation();
+    if (conversation === null) {
+      return;
+    }
+    activeConversationId = conversation.id;
+    renderNewConversation(conversation);
+    activateView("chat", false);
+    ui.questionInput.value = "";
+    setQuestionMessage("New chat ready.", "success");
+    announce("A new chat is ready.");
+    ui.questionInput.focus();
+    loadConversations();
+  }
+
+  async function createConversation() {
+    if (isConversationAction) {
+      return null;
+    }
+    setConversationActionBusy(true);
+    try {
+      const response = await fetch("/api/conversations", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      const payload = await readJson(response);
+      if (!response.ok || !isRecord(payload) || payload.ok !== true) {
+        throw new RequestFailure(getSafeErrorMessage(payload));
+      }
+      const conversation = normalizeConversationSummary(payload.conversation);
+      if (conversation === null) {
+        throw new RequestFailure("The new chat could not be created safely.");
+      }
+      return conversation;
+    } catch (error) {
+      const message = error instanceof RequestFailure
+        ? error.message
+        : "A new chat could not be created. Please try again later.";
+      setQuestionMessage(message, "error");
+      announce("A new chat could not be created.");
+      return null;
+    } finally {
+      setConversationActionBusy(false);
+    }
+  }
+
+  async function loadConversations() {
+    try {
+      const response = await fetch("/api/conversations", { headers: { Accept: "application/json" } });
+      const payload = await readJson(response);
+      if (!response.ok || !isRecord(payload) || payload.ok !== true) {
+        throw new Error("Conversations unavailable");
+      }
+      conversations = normalizeConversationList(payload.conversations);
+      renderConversationList(conversations);
+      const active = conversations.find(function (conversation) {
+        return conversation.id === activeConversationId;
+      });
+      if (active) {
+        updateConversationHeader(active);
+      }
+      if (initialConversationRestorePending) {
+        initialConversationRestorePending = false;
+        // Conversation identity is backend-authoritative. On a fresh browser
+        // load, restore the most recently updated saved chat instead of making
+        // a different one until the user explicitly chooses New chat.
+        if (activeConversationId === null && conversations.length > 0) {
+          loadConversation(conversations[0].id, true);
+          return;
+        }
+      }
+      initialConversationLoadPending = false;
+    } catch (_error) {
+      initialConversationRestorePending = false;
+      initialConversationLoadPending = false;
+      if (conversations.length === 0) {
+        ui.conversationList.replaceChildren();
+        ui.conversationListEmpty.hidden = false;
+        ui.conversationListEmpty.textContent = "Saved chats are unavailable right now.";
+      }
+    }
+  }
+
+  async function loadConversation(conversationId, restoringInitialConversation = false) {
+    const safeId = safeConversationId(conversationId);
+    if (safeId === null || isSubmitting || isConversationAction) {
+      if (restoringInitialConversation) {
+        initialConversationLoadPending = false;
+      }
+      return;
+    }
+
+    setConversationActionBusy(true);
+    try {
+      const response = await fetch(`/api/conversations/${encodeURIComponent(safeId)}`, {
+        headers: { Accept: "application/json" },
+      });
+      const payload = await readJson(response);
+      if (!response.ok || !isRecord(payload) || payload.ok !== true) {
+        throw new RequestFailure(getSafeErrorMessage(payload));
+      }
+      const conversation = normalizeConversationDetail(payload.conversation);
+      if (conversation === null) {
+        throw new RequestFailure("This saved chat could not be loaded safely.");
+      }
+
+      activeConversationId = conversation.id;
+      renderConversationDetail(conversation);
+      renderConversationList(conversations);
+      activateView("chat", false);
+      // Announced for screen readers only; no visible toast for a
+      // routine action that the user just asked for.
+      setQuestionMessage("", "");
+      announce("Chat opened.");
+    } catch (error) {
+      const message = error instanceof RequestFailure
+        ? error.message
+        : "This saved chat could not be loaded. Please try again later.";
+      setQuestionMessage(message, "error");
+      announce("Saved chat could not be loaded.");
+    } finally {
+      setConversationActionBusy(false);
+      if (restoringInitialConversation) {
+        initialConversationLoadPending = false;
+      }
+    }
+  }
+
+  async function deleteConversation(conversationId) {
+    const safeId = safeConversationId(conversationId);
+    if (safeId === null || isSubmitting || isConversationAction) {
+      return;
+    }
+    const confirmed = window.confirm(
+      "Delete this saved chat? This cannot be undone. Charts, data, and logs are not affected.",
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setConversationActionBusy(true);
+    try {
+      const response = await fetch(`/api/conversations/${encodeURIComponent(safeId)}`, {
+        method: "DELETE",
+        headers: { Accept: "application/json" },
+      });
+      const payload = await readJson(response);
+      if (!response.ok || !isRecord(payload) || payload.ok !== true) {
+        throw new RequestFailure(getSafeErrorMessage(payload));
+      }
+      if (activeConversationId === safeId) {
+        renderNewConversation();
+        ui.questionInput.value = "";
+      }
+      conversations = conversations.filter(function (conversation) {
+        return conversation.id !== safeId;
+      });
+      renderConversationList(conversations);
+      setQuestionMessage("Saved chat deleted.", "success");
+      announce("Saved chat deleted.");
+      loadConversations();
+    } catch (error) {
+      const message = error instanceof RequestFailure
+        ? error.message
+        : "This saved chat could not be deleted. Please try again later.";
+      setQuestionMessage(message, "error");
+      announce("Saved chat could not be deleted.");
+    } finally {
+      setConversationActionBusy(false);
+    }
+  }
+
+  async function deleteAllConversations() {
+    if (isSubmitting || isConversationAction) {
+      return;
+    }
+    const confirmed = window.confirm(
+      "Delete all saved chats? This cannot be undone. Charts, data, and logs are not affected.",
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setConversationActionBusy(true);
+    try {
+      const response = await fetch("/api/conversations", {
+        method: "DELETE",
+        headers: { Accept: "application/json" },
+      });
+      const payload = await readJson(response);
+      if (!response.ok || !isRecord(payload) || payload.ok !== true) {
+        throw new RequestFailure(getSafeErrorMessage(payload));
+      }
+      conversations = [];
+      renderConversationList(conversations);
+      renderNewConversation();
+      ui.questionInput.value = "";
+      setQuestionMessage("All saved chats were deleted.", "success");
+      announce("All saved chats were deleted.");
+    } catch (error) {
+      const message = error instanceof RequestFailure
+        ? error.message
+        : "Saved chats could not be deleted. Please try again later.";
+      setQuestionMessage(message, "error");
+      announce("Saved chats could not be deleted.");
+    } finally {
+      setConversationActionBusy(false);
+    }
+  }
+
+  function renderNewConversation(conversation) {
+    activeConversationId = conversation ? safeConversationId(conversation.id) : null;
+    ui.activeConversationTitle.textContent = conversation ? conversation.title : "New chat";
+    ui.conversationMeta.textContent = conversation
+      ? "This chat is ready for your first question."
+      : "Ask a question to begin.";
+    ui.conversationStream.replaceChildren(createConversationEmpty());
+    ui.conversationStream.setAttribute("aria-busy", "false");
+    renderConversationList(conversations);
+  }
+
+  function renderConversationDetail(conversation) {
+    ui.activeConversationTitle.textContent = conversation.title;
+    const count = conversation.messages.length;
+    ui.conversationMeta.textContent = count === 0
+      ? "This saved chat has no messages yet."
+      : `${formatCount(count)} ${count === 1 ? "message" : "messages"} saved locally.`;
+    ui.conversationStream.replaceChildren();
+    ui.conversationStream.setAttribute("aria-busy", "false");
+
+    if (conversation.messages.length === 0) {
+      ui.conversationStream.append(createConversationEmpty());
+      return;
+    }
+
+    let latestQuestion = "";
+    for (const message of conversation.messages) {
+      if (message.role === "user") {
+        latestQuestion = message.content;
+      }
+      ui.conversationStream.append(createConversationMessage(message, latestQuestion));
+    }
+    if (conversation.messagesTruncated) {
+      const notice = document.createElement("p");
+      notice.className = "message-history-notice";
+      notice.textContent = "Only the most recent saved messages are shown in this view.";
+      ui.conversationStream.append(notice);
+    }
+  }
+
+  function renderConversationList(entries) {
+    ui.conversationList.replaceChildren();
+    ui.conversationListEmpty.hidden = entries.length !== 0;
+    if (entries.length === 0) {
+      if (ui.conversationListEmpty.textContent !== "Saved chats are unavailable right now.") {
+        ui.conversationListEmpty.textContent = "Your saved chats will appear here.";
+      }
+      syncConversationControls();
+      return;
+    }
+
+    const groups = new Map([
+      ["Today", []],
+      ["Yesterday", []],
+      ["Previous 7 Days", []],
+      ["Older", []],
+    ]);
+    for (const entry of entries) {
+      groups.get(conversationGroupLabel(entry.updatedAt)).push(entry);
+    }
+
+    for (const [label, group] of groups) {
+      if (group.length === 0) {
+        continue;
+      }
+      const section = document.createElement("section");
+      const heading = document.createElement("h3");
+      const list = document.createElement("ol");
+      section.className = "conversation-group";
+      heading.className = "conversation-group-title";
+      heading.textContent = label;
+      list.className = "conversation-group-list";
+      for (const entry of group) {
+        list.append(createConversationListItem(entry));
+      }
+      section.append(heading, list);
+      ui.conversationList.append(section);
+    }
+    syncConversationControls();
+  }
+
+  function closeConversationMenus() {
+    for (const popover of document.querySelectorAll(".conversation-menu-popover")) {
+      popover.hidden = true;
+    }
+    for (const trigger of document.querySelectorAll(".conversation-menu-trigger")) {
+      trigger.setAttribute("aria-expanded", "false");
+    }
+  }
+
+  function createConversationListItem(entry) {
+    const item = document.createElement("li");
+    const selectButton = document.createElement("button");
+    const copy = document.createElement("span");
+    const title = document.createElement("span");
+    const metadata = document.createElement("span");
+    const deleteButton = document.createElement("button");
+
+    item.className = "conversation-list-item";
+    selectButton.type = "button";
+    selectButton.className = "conversation-select";
+    selectButton.classList.toggle("is-active", entry.id === activeConversationId);
+    if (entry.id === activeConversationId) {
+      selectButton.setAttribute("aria-current", "page");
+    }
+    selectButton.addEventListener("click", function () {
+      loadConversation(entry.id);
+    });
+
+    copy.className = "conversation-list-copy";
+    title.className = "conversation-list-title";
+    title.textContent = entry.title;
+    metadata.className = "conversation-list-meta";
+    metadata.textContent = formatTimestamp(entry.updatedAt);
+    copy.append(title, metadata);
+    selectButton.append(copy);
+
+    // Overflow menu rather than a permanent Delete on every row.
+    const menu = document.createElement("div");
+    menu.className = "conversation-menu";
+
+    const trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = "conversation-menu-trigger";
+    trigger.setAttribute("aria-haspopup", "true");
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.setAttribute("aria-label", "Chat actions");
+    const dots = document.createElement("span");
+    dots.setAttribute("aria-hidden", "true");
+    dots.textContent = "⋯";
+    trigger.append(dots);
+
+    const popover = document.createElement("div");
+    popover.className = "conversation-menu-popover";
+    popover.hidden = true;
+
+    deleteButton.type = "button";
+    deleteButton.className = "conversation-delete";
+    deleteButton.dataset.deleteConversation = entry.id;
+    deleteButton.textContent = "Delete chat";
+    deleteButton.addEventListener("click", function () {
+      closeConversationMenus();
+      deleteConversation(entry.id);
+    });
+    popover.append(deleteButton);
+
+    trigger.addEventListener("click", function (event) {
+      event.stopPropagation();
+      const willOpen = popover.hidden;
+      closeConversationMenus();
+      popover.hidden = !willOpen;
+      trigger.setAttribute("aria-expanded", willOpen ? "true" : "false");
+      if (willOpen) {
+        deleteButton.focus();
+      }
+    });
+
+    menu.append(trigger, popover);
+    item.append(selectButton, menu);
+    return item;
+  }
+
+  function appendPendingTurn(question) {
+    removeConversationEmpty();
+    ui.conversationStream.append(createUserMessage(question));
+    const pending = createPendingAssistantMessage();
+    ui.conversationStream.append(pending);
+    scrollConversationToEnd();
+    return pending;
+  }
+
+  function replacePendingMessage(pending, replacement) {
+    if (pending && pending.parentElement === ui.conversationStream) {
+      pending.replaceWith(replacement);
+      scrollConversationToEnd();
+    }
+  }
+
+  function createConversationMessage(message, latestQuestion) {
+    return message.role === "user"
+      ? createUserMessage(message.content, message.createdAt)
+      : createAssistantMessage(message, latestQuestion);
+  }
+
+  function createUserMessage(content, createdAt) {
+    const article = document.createElement("article");
+    const header = document.createElement("header");
+    const label = document.createElement("span");
+    const timestamp = document.createElement("time");
+    const body = document.createElement("p");
+    article.className = "chat-message chat-message-user";
+    header.className = "chat-message-header";
+    label.className = "chat-message-role";
+    label.textContent = "You";
+    timestamp.className = "chat-message-time";
+    timestamp.textContent = formatTimestamp(createdAt);
+    body.className = "chat-message-content";
+    body.textContent = content;
+    header.append(label, timestamp);
+    article.append(header, body);
+    return article;
+  }
+
+  function createPendingAssistantMessage() {
+    const article = document.createElement("article");
+    const header = document.createElement("header");
+    const label = document.createElement("span");
+    const body = document.createElement("p");
+    article.className = "chat-message chat-message-assistant is-pending";
+    article.setAttribute("aria-live", "polite");
+    header.className = "chat-message-header";
+    label.className = "chat-message-role";
+    label.textContent = "Analytics Assistant";
+    body.className = "chat-message-content pending-copy";
+    body.textContent = "Thinking...";
+    header.append(label);
+    article.append(header, body);
+    return article;
+  }
+
+  function createFailedAssistantMessage(message) {
+    const article = document.createElement("article");
+    const header = document.createElement("header");
+    const label = document.createElement("span");
+    const body = document.createElement("p");
+    article.className = "chat-message chat-message-assistant chat-message-failed";
+    header.className = "chat-message-header";
+    label.className = "chat-message-role";
+    label.textContent = "Analytics Assistant";
+    body.className = "chat-message-error";
+    body.textContent = message;
+    header.append(label);
+    article.append(header, body);
+    return article;
+  }
+
+  function createAssistantMessage(message, latestQuestion) {
+    const article = document.createElement("article");
+    const header = document.createElement("header");
+    const label = document.createElement("span");
+    const timestamp = document.createElement("time");
+    const body = document.createElement("p");
+
+    article.className = "chat-message chat-message-assistant";
+    header.className = "chat-message-header";
+    label.className = "chat-message-role";
+    label.textContent = message.meta.refused ? "Assistant response" : "Analytics Assistant";
+    timestamp.className = "chat-message-time";
+    timestamp.textContent = formatTimestamp(message.createdAt);
+    body.className = "chat-message-content";
+    body.textContent = message.content;
+    header.append(label, timestamp);
+    article.append(header, body);
+
+    if (message.meta.answerFallbackUsed && message.meta.hasResult) {
+      const warning = document.createElement("p");
+      warning.className = "message-warning";
+      warning.setAttribute("role", "status");
+      warning.textContent = "Answer generation was unavailable, so the returned result data is shown below.";
+      article.append(warning);
+    }
+
+    appendDataBlock(article, message);
+    appendChartBlock(article, message.chart, message.question || latestQuestion);
+    return article;
+  }
+
+  function appendDataBlock(article, message) {
+    if (message.meta.refused || !message.meta.hasResult) {
+      return;
+    }
+    const hasCurrentRows = Array.isArray(message.columns) && Array.isArray(message.rows);
+    if (hasCurrentRows) {
+      if (message.columns.length === 0 || message.rows.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "message-data-empty";
+        empty.textContent = "No rows returned.";
+        article.append(empty);
+        return;
+      }
+      article.append(createDataToggle(message));
+      return;
+    }
+
+    if (message.historical) {
+      const unavailable = document.createElement("p");
+      unavailable.className = "message-data-unavailable";
+      if (message.rowCount === 0) {
+        unavailable.textContent = "No rows were returned for this saved message.";
+      } else if (message.rowCount !== null) {
+        unavailable.textContent = `${formatCount(message.rowCount)} ${message.rowCount === 1 ? "row was" : "rows were"} returned for this saved message. Detailed rows were not retained for this saved chat.`;
+      } else {
+        unavailable.textContent = "The returned data rows were not retained for this saved chat.";
+      }
+      article.append(unavailable);
+    }
+  }
+
+  function createDataToggle(message) {
+    const wrapper = document.createElement("section");
+    const button = document.createElement("button");
+    const panel = document.createElement("div");
+    const panelId = `message-data-${dataPanelSequence += 1}`;
+    const rowCount = message.rowCount === null ? message.rows.length : message.rowCount;
+
+    wrapper.className = "message-data";
+    button.type = "button";
+    button.className = "data-toggle";
+    button.setAttribute("aria-expanded", "false");
+    button.setAttribute("aria-controls", panelId);
+    button.textContent = `View data (${formatCount(rowCount)} ${rowCount === 1 ? "row" : "rows"})`;
+    panel.className = "message-data-panel";
+    panel.id = panelId;
+    panel.hidden = true;
+    panel.append(createResultTable(message.columns, message.rows));
+
+    if (message.truncated) {
+      const truncation = document.createElement("p");
+      truncation.className = "message-truncation";
+      truncation.textContent = message.maxRows === null
+        ? "Results were truncated by the configured result limit."
+        : `Showing the first ${formatCount(message.maxRows)} rows. Additional rows were not fetched because of the configured result limit.`;
+      panel.append(truncation);
+    }
+
+    button.addEventListener("click", function () {
+      const expanded = button.getAttribute("aria-expanded") === "true";
+      button.setAttribute("aria-expanded", String(!expanded));
+      button.textContent = expanded
+        ? `View data (${formatCount(rowCount)} ${rowCount === 1 ? "row" : "rows"})`
+        : "Hide data";
+      panel.hidden = expanded;
+    });
+
+    wrapper.append(button, panel);
+    return wrapper;
+  }
+
+  function createResultTable(columns, rows) {
+    const wrap = document.createElement("div");
+    const table = document.createElement("table");
+    const caption = document.createElement("caption");
+    const head = document.createElement("thead");
+    const body = document.createElement("tbody");
+    const headerRow = document.createElement("tr");
+
+    wrap.className = "table-wrap message-table-wrap";
+    wrap.tabIndex = 0;
+    wrap.setAttribute("aria-label", "Returned result table");
+    caption.className = "sr-only";
+    caption.textContent = "Returned result rows";
+    for (const column of columns) {
+      const heading = document.createElement("th");
+      heading.scope = "col";
+      heading.textContent = displayValue(column);
+      headerRow.append(heading);
+    }
+    head.append(headerRow);
+
+    for (const sourceRow of rows) {
+      const row = document.createElement("tr");
+      const values = Array.isArray(sourceRow) ? sourceRow : [];
+      for (let index = 0; index < columns.length; index += 1) {
+        const cell = document.createElement("td");
+        cell.textContent = displayValue(values[index]);
+        row.append(cell);
+      }
+      body.append(row);
+    }
+
+    table.append(caption, head, body);
+    wrap.append(table);
+    return wrap;
+  }
+
+  function appendChartBlock(article, chart, question) {
+    if (!chart.requested) {
+      return;
+    }
+    const section = document.createElement("section");
+    const heading = document.createElement("div");
+    const label = document.createElement("p");
+    const type = document.createElement("span");
+    section.className = "message-chart";
+    section.tabIndex = -1;
+    heading.className = "message-chart-heading";
+    label.className = "message-chart-label";
+    label.textContent = "Chart";
+    type.className = "message-chart-type";
+    type.hidden = chart.type === null;
+    type.textContent = chart.type === null ? "" : `${chart.type} chart`;
+    heading.append(label, type);
+    section.append(heading);
+
+    if (chart.available && chart.url !== null) {
+      const figure = document.createElement("figure");
+      const image = document.createElement("img");
+      figure.className = "message-chart-figure";
+      image.src = chart.url;
+      image.alt = chartAlt(chart.type, question);
+      image.decoding = "async";
+      image.addEventListener("error", function () {
+        renderMissingChart(section, chart.note, chart.historical, chart.generated);
+      });
+      figure.append(image);
+      section.append(figure);
+      if (chart.note !== "") {
+        const note = document.createElement("p");
+        note.className = "message-chart-note";
+        note.textContent = chart.note;
+        section.append(note);
+      }
+    } else {
+      renderMissingChart(section, chart.note, chart.historical, chart.generated);
+    }
+    article.append(section);
+  }
+
+  function renderMissingChart(section, note, historical, generated) {
+    const heading = section.querySelector(".message-chart-heading");
+    const missing = document.createElement("p");
+    missing.className = "message-chart-missing";
+    missing.textContent = historical && generated
+      ? "This saved chart is unavailable because its PNG file is no longer on disk."
+      : (note || "A meaningful chart could not be created from the returned data.");
+    section.replaceChildren(heading, missing);
+    if (historical && generated && note !== "") {
+      const noteElement = document.createElement("p");
+      noteElement.className = "message-chart-note";
+      noteElement.textContent = note;
+      section.append(noteElement);
+    }
+  }
+
+  function currentResponseMessage(payload, question) {
+    const metadata = isRecord(payload.meta) ? payload.meta : {};
+    const columns = normalizeColumns(payload.columns);
+    const rows = normalizeRows(payload.rows, columns.length);
+    const rowCount = asNonNegativeInteger(payload.row_count);
+    return {
+      chart: normalizeCurrentChart(payload.chart),
+      columns,
+      content: safeMessageContent(payload.answer, "The answer could not be generated. The returned data is shown below."),
+      createdAt: new Date().toISOString(),
+      historical: false,
+      meta: {
+        answerFallbackUsed: metadata.answer_fallback_used === true,
+        hasResult: metadata.has_result === true,
+        refused: payload.refused === true || metadata.refused === true,
+        success: metadata.success !== false,
+      },
+      question,
+      rowCount: rowCount === null ? rows.length : rowCount,
+      rows,
+      truncated: payload.truncated === true,
+      maxRows: asNonNegativeInteger(payload.max_rows),
+    };
+  }
+
+  function normalizeConversationList(value) {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    const normalized = [];
+    for (const entry of value) {
+      const conversation = normalizeConversationSummary(entry);
+      if (conversation === null || normalized.some(function (existing) { return existing.id === conversation.id; })) {
+        continue;
+      }
+      normalized.push(conversation);
+      if (normalized.length === MAX_CONVERSATIONS) {
+        break;
+      }
+    }
+    return normalized;
+  }
+
+  function normalizeConversationSummary(value) {
+    if (!isRecord(value)) {
+      return null;
+    }
+    const id = safeConversationId(value.conversation_id);
+    if (id === null) {
+      return null;
+    }
+    return {
+      createdAt: safeTimestamp(value.created_at),
+      id,
+      messageCount: asNonNegativeInteger(value.message_count) || 0,
+      title: safeTitle(value.title),
+      updatedAt: safeTimestamp(value.updated_at),
+    };
+  }
+
+  function normalizeConversationDetail(value) {
+    if (!isRecord(value)) {
+      return null;
+    }
+    const summary = normalizeConversationSummary(value);
+    if (summary === null || !Array.isArray(value.messages)) {
+      return null;
+    }
+    const messages = [];
+    for (const source of value.messages) {
+      const message = normalizeStoredMessage(source);
+      if (message !== null) {
+        messages.push(message);
+      }
+    }
+    return { ...summary, messages, messagesTruncated: value.messages_truncated === true };
+  }
+
+  function normalizeStoredMessage(value) {
+    if (!isRecord(value) || (value.role !== "user" && value.role !== "assistant")) {
+      return null;
+    }
+    const metadata = isRecord(value.meta) ? value.meta : {};
+    return {
+      chart: normalizeStoredChart(value.chart),
+      content: safeMessageContent(value.content, value.role === "assistant" ? "No response was saved." : ""),
+      createdAt: safeTimestamp(value.created_at),
+      historical: true,
+      meta: {
+        answerFallbackUsed: metadata.answer_fallback_used === true,
+        hasResult: metadata.has_result === true,
+        refused: metadata.refused === true,
+        success: metadata.success !== false,
+      },
+      question: "",
+      role: value.role,
+      rowCount: asNonNegativeInteger(value.row_count),
+      rows: null,
+      columns: null,
+      truncated: value.truncated === true,
+      maxRows: null,
+    };
+  }
+
+  function normalizeCurrentChart(value) {
+    const source = isRecord(value) ? value : {};
+    const url = safeChartUrl(source.url);
+    return {
+      available: url !== null,
+      generated: url !== null,
+      historical: false,
+      note: safeOptionalText(source.note, 500),
+      requested: source.requested === true,
+      type: safeChartType(source.type),
+      url,
+    };
+  }
+
+  function normalizeStoredChart(value) {
+    const source = isRecord(value) ? value : {};
+    const url = source.available === true ? safeChartUrl(source.url) : null;
+    const type = safeChartType(source.type);
+    return {
+      available: url !== null,
+      generated: type !== null,
+      historical: true,
+      note: safeOptionalText(source.note, 500),
+      requested: source.requested === true,
+      type,
+      url,
+    };
+  }
+
+  function normalizeColumns(value) {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value.slice(0, 100).map(function (column) {
+      return typeof column === "string" ? column.slice(0, 250) : displayValue(column).slice(0, 250);
+    });
+  }
+
+  function normalizeRows(value, columnCount) {
+    if (!Array.isArray(value) || columnCount === 0) {
+      return [];
+    }
+    return value.slice(0, 1000).map(function (row) {
+      return Array.isArray(row) ? row.slice(0, columnCount) : [];
+    });
+  }
+
+  function createConversationEmpty() {
+    const empty = document.createElement("div");
+    const icon = document.createElement("span");
+    const brand = document.createElement("p");
+    const heading = document.createElement("h3");
+    const copy = document.createElement("span");
+    const suggestions = document.createElement("div");
+    empty.className = "conversation-empty";
+    empty.id = "conversation-empty";
+    icon.className = "conversation-empty-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = "✦";
+    brand.className = "welcome-brand";
+    brand.textContent = "Analytics Assistant";
+    heading.className = "welcome-heading";
+    heading.textContent = "What can I help you analyze?";
+    copy.className = "welcome-copy";
+    copy.textContent = "Choose a starting point or ask your own question below.";
+    suggestions.className = "suggestion-grid";
+    suggestions.setAttribute("aria-label", "Suggested questions");
+    suggestions.append(
+      createSuggestionCard(
+        "Pipeline Analysis",
+        "Understand your current pipeline",
+        "Analyze our current pipeline by stage.",
+      ),
+      createSuggestionCard(
+        "Performance Insights",
+        "Compare regions, owners, or accounts",
+        "Compare performance across regions.",
+      ),
+      createSuggestionCard(
+        "Opportunity Trends",
+        "Explore how opportunities change over time",
+        "Show opportunity creation trends over time.",
+      ),
+    );
+    empty.append(icon, brand, heading, copy, suggestions);
+    return empty;
+  }
+
+  function createSuggestionCard(title, description, question) {
+    const button = document.createElement("button");
+    const heading = document.createElement("strong");
+    const copy = document.createElement("span");
+    button.type = "button";
+    button.className = "suggestion-card";
+    button.dataset.exampleQuestion = question;
+    heading.textContent = title;
+    copy.textContent = description;
+    button.append(heading, copy);
+    return button;
+  }
+
+  function removeConversationEmpty() {
+    const empty = document.getElementById("conversation-empty");
+    if (empty && empty.parentElement === ui.conversationStream) {
+      empty.remove();
+    }
+  }
+
+  function updateConversationHeaderForActive() {
+    const active = conversations.find(function (conversation) {
+      return conversation.id === activeConversationId;
+    });
+    if (active) {
+      updateConversationHeader(active);
+      renderConversationList(conversations);
+      return;
+    }
+    ui.conversationMeta.textContent = "This chat is being saved locally.";
+  }
+
+  function updateConversationHeader(conversation) {
+    ui.activeConversationTitle.textContent = conversation.title;
+    ui.conversationMeta.textContent = conversation.messageCount === 0
+      ? "This chat is ready for your first question."
+      : `${formatCount(conversation.messageCount)} ${conversation.messageCount === 1 ? "message" : "messages"} saved locally.`;
+  }
+
+  function scrollConversationToEnd() {
+    window.setTimeout(function () {
+      ui.conversationStream.scrollTop = ui.conversationStream.scrollHeight;
+    }, 0);
   }
 
   async function readJson(response) {
@@ -202,413 +1189,33 @@
     }
   }
 
-  function renderResult(payload, typedQuestion) {
-    const columns = Array.isArray(payload.columns) ? payload.columns : [];
-    const rows = Array.isArray(payload.rows) ? payload.rows : [];
-    const answer = typeof payload.answer === "string" ? payload.answer : "";
-    const question = typeof payload.question === "string" ? payload.question : typedQuestion;
-    const metadata = isRecord(payload.meta) ? payload.meta : {};
-    const refused = payload.refused === true || metadata.refused === true;
-
-    ui.resultsCard.hidden = false;
-    // A refusal is a normal answer, not a failure: neutral label, no error styling.
-    ui.resultStatus.textContent = refused ? "ASSISTANT RESPONSE" : "RESULT";
-    ui.resultStatus.classList.remove("is-error");
-
-    // Shows which question this answer belongs to. Untrusted text, so it is set
-    // as text content and never parsed as markup.
-    const askedText = typeof question === "string" ? question.trim() : "";
-    ui.askedQuestion.textContent = askedText;
-    ui.askedBlock.hidden = askedText.length === 0;
-
-    ui.answerText.textContent = answer;
-    ui.answerWarning.hidden = metadata.answer_fallback_used !== true;
-    ui.answerWarning.textContent = metadata.answer_fallback_used === true
-      ? "Answer generation was unavailable, so the returned result rows are shown below."
-      : "";
-
-    if (refused) {
-      // Nothing was computed, so there is no table, no row count and no chart
-      // to show. Clearing them prevents stale output from a previous question.
-      ui.rowMeta.textContent = "";
-      ui.truncationNote.textContent = "";
-      ui.truncationNote.hidden = true;
-      renderResultTable([], []);
-      ui.tableWrap.hidden = true;
-      ui.emptyResult.hidden = true;
-      resetChart();
-      return;
-    }
-
-    ui.tableWrap.hidden = false;
-    renderRowMetadata(payload, rows);
-    renderResultTable(columns, rows);
-    renderChart(payload.chart, question);
-  }
-
-  function renderRowMetadata(payload, rows) {
-    const rowCount = asNonNegativeInteger(payload.row_count);
-    const isTruncated = payload.truncated === true;
-
-    if (rowCount === null) {
-      ui.rowMeta.textContent = "Results returned.";
-    } else {
-      ui.rowMeta.textContent = `${formatCount(rowCount)} ${rowCount === 1 ? "row" : "rows"} returned.`;
-    }
-
-    ui.truncationNote.hidden = !isTruncated;
-    if (isTruncated) {
-      const maxRows = asNonNegativeInteger(payload.max_rows);
-      if (maxRows !== null) {
-        ui.truncationNote.textContent = `Showing the first ${formatCount(maxRows)} rows. Additional rows were not fetched because of the configured result limit.`;
-      } else {
-        ui.truncationNote.textContent = "Results were truncated by the configured result limit.";
-      }
-    } else {
-      ui.truncationNote.textContent = "";
-    }
-
-    ui.emptyResult.hidden = rows.length !== 0;
-  }
-
-  function renderResultTable(columns, rows) {
-    ui.resultTableHead.replaceChildren();
-    ui.resultTableBody.replaceChildren();
-    ui.tableWrap.hidden = columns.length === 0 || rows.length === 0;
-    ui.resultTableCaption.textContent = "Query result rows";
-
-    if (columns.length === 0 || rows.length === 0) {
-      return;
-    }
-
-    const headerRow = document.createElement("tr");
-    for (const column of columns) {
-      const heading = document.createElement("th");
-      heading.scope = "col";
-      heading.textContent = displayValue(column);
-      headerRow.append(heading);
-    }
-    ui.resultTableHead.append(headerRow);
-
-    for (const sourceRow of rows) {
-      const tableRow = document.createElement("tr");
-      const values = Array.isArray(sourceRow) ? sourceRow : [];
-      for (let index = 0; index < columns.length; index += 1) {
-        const cell = document.createElement("td");
-        cell.textContent = displayValue(values[index]);
-        tableRow.append(cell);
-      }
-      ui.resultTableBody.append(tableRow);
-    }
-  }
-
-  function renderChart(sourceChart, question) {
-    const chart = isRecord(sourceChart) ? sourceChart : {};
-    const chartUrl = safeChartUrl(chart.url);
-    const chartType = safeChartType(chart.type);
-    const requested = chart.requested === true;
-
-    ui.chartNote.hidden = true;
-    ui.chartNote.textContent = "";
-    ui.chartMessage.hidden = true;
-    ui.chartMessage.textContent = "";
-    ui.chartTypeBadge.hidden = chartType === null;
-    ui.chartTypeBadge.textContent = chartType === null ? "" : `${chartType} chart`;
-
-    if (chartUrl !== null) {
-      ui.chartEmpty.hidden = true;
-      ui.chartFigure.hidden = false;
-      ui.chartImage.alt = chartAlt(chartType, question);
-      ui.chartImage.src = chartUrl;
-
-      if (typeof chart.note === "string" && chart.note.trim().length > 0) {
-        ui.chartNote.textContent = chart.note;
-        ui.chartNote.hidden = false;
-      }
-      return;
-    }
-
-    ui.chartFigure.hidden = true;
-    ui.chartImage.removeAttribute("src");
-    ui.chartEmpty.hidden = false;
-    setChartEmptyCopy(
-      requested ? "Chart unavailable." : "No chart requested yet.",
-      requested
-        ? "The analysis completed, but a chart image was not available."
-        : "Enable “Generate chart” when you ask a question to see a local visualization here.",
-    );
-
-    if (typeof chart.note === "string" && chart.note.trim().length > 0) {
-      ui.chartMessage.textContent = chart.note;
-      ui.chartMessage.hidden = false;
-    }
-  }
-
-  function showChartImageError() {
-    ui.chartImage.removeAttribute("src");
-    ui.chartFigure.hidden = true;
-    ui.chartEmpty.hidden = false;
-    setChartEmptyCopy("Chart unavailable.", "The generated chart image could not be displayed.");
-    ui.chartMessage.textContent = "The chart file is unavailable. Submit a new question if you need another chart.";
-    ui.chartMessage.hidden = false;
-  }
-
-  function resetChart() {
-    ui.chartImage.removeAttribute("src");
-    ui.chartImage.alt = "";
-    ui.chartFigure.hidden = true;
-    ui.chartEmpty.hidden = false;
-    ui.chartTypeBadge.hidden = true;
-    ui.chartTypeBadge.textContent = "";
-    ui.chartNote.hidden = true;
-    ui.chartNote.textContent = "";
-    ui.chartMessage.hidden = true;
-    ui.chartMessage.textContent = "";
-    setChartEmptyCopy(
-      "No chart requested yet.",
-      "Enable “Generate chart” when you ask a question to see a local visualization here.",
-    );
-  }
-
-  function setChartEmptyCopy(title, description) {
-    const titleElement = ui.chartEmpty.querySelector("p");
-    const descriptionElement = ui.chartEmpty.querySelector("span:last-child");
-    titleElement.textContent = title;
-    descriptionElement.textContent = description;
-  }
-
-  async function loadHistory() {
-    try {
-      const response = await fetch("/api/history", { headers: { Accept: "application/json" } });
-      const payload = await readJson(response);
-      if (!response.ok || !isRecord(payload) || payload.ok !== true) {
-        throw new Error("History unavailable");
-      }
-      savedHistory = normalizeHistory(payload.history);
-    } catch (_error) {
-      // A history outage must never obscure the current analysis.
-      savedHistory = [];
-    }
-    renderHistory(savedHistory);
-    renderChartGallery();
-  }
-
-  function renderHistory(entries) {
-    ui.historyList.replaceChildren();
-    ui.historyEmpty.hidden = entries.length !== 0;
-    for (const entry of entries) {
-      ui.historyList.append(createHistoryItem(entry));
-    }
-  }
-
-  function renderChartGallery() {
-    // The gallery is rebuilt from saved history, so charts survive a refresh
-    // instead of living only in page memory.
-    const chartEntries = savedHistory.filter(function (entry) {
-      return entry.chartRequested;
-    });
-    ui.chartGallery.replaceChildren();
-    ui.chartsEmpty.hidden = chartEntries.length !== 0;
-    for (const entry of chartEntries) {
-      ui.chartGallery.append(createGalleryItem(entry));
-    }
-  }
-
-  function normalizeHistory(entries) {
-    if (!Array.isArray(entries)) {
-      return [];
-    }
-    const normalized = [];
-    for (const entry of entries) {
-      if (!isRecord(entry) || typeof entry.question !== "string" || entry.question.trim().length === 0) {
-        continue;
-      }
-      const chart = isRecord(entry.chart) ? entry.chart : {};
-      const chartUrl = chart.available === true ? safeChartUrl(chart.url) : null;
-      const answer = typeof entry.answer === "string" ? entry.answer : "";
-      normalized.push({
-        id: typeof entry.id === "string" ? entry.id : "",
-        answerPreview: answer.slice(0, 180),
-        chartRequested: chart.requested === true,
-        chartAvailable: chartUrl !== null,
-        chartType: safeChartType(chart.type),
-        chartUrl,
-        question: entry.question.slice(0, 2000),
-        rowCount: asNonNegativeInteger(entry.row_count),
-        timestamp: safeTimestamp(entry.created_at),
-      });
-      if (normalized.length === HISTORY_LIMIT) {
-        break;
-      }
-    }
-    return normalized;
-  }
-
-  function createHistoryItem(entry) {
-    const item = document.createElement("li");
-    const button = document.createElement("button");
-    const copy = document.createElement("span");
-    const question = document.createElement("span");
-    const preview = document.createElement("span");
-    const metadata = document.createElement("span");
-    const timestamp = document.createElement("span");
-    const rowCount = document.createElement("span");
-
-    button.type = "button";
-    button.className = "history-item";
-    button.addEventListener("click", function () {
-      ui.questionInput.value = entry.question;
-      setQuestionMessage("Question added from history. Submit it when you are ready.", "success");
-      activateView("ask", true);
-      ui.questionInput.focus();
-    });
-
-    copy.className = "history-copy";
-    question.className = "history-question";
-    question.textContent = entry.question;
-    preview.className = "history-preview";
-    preview.textContent = entry.answerPreview || "Completed analysis";
-    copy.append(question, preview);
-
-    metadata.className = "history-meta";
-    timestamp.textContent = formatTimestamp(entry.timestamp);
-    rowCount.textContent = entry.rowCount === null ? "Results returned" : `${formatCount(entry.rowCount)} rows`;
-    metadata.append(timestamp, rowCount);
-    if (entry.chartRequested) {
-      const chartState = document.createElement("span");
-      chartState.className = "history-chart";
-      chartState.textContent = entry.chartAvailable ? "Chart generated" : "Chart unavailable";
-      metadata.append(chartState);
-    }
-
-    button.append(copy, metadata);
-    item.append(button);
-    return item;
-  }
-
-  function createGalleryItem(entry) {
-    // A chart file can be removed from disk while its history row remains, so
-    // an unavailable chart renders as a plain, non-linking card.
-    const card = document.createElement(entry.chartAvailable ? "a" : "div");
-    const content = document.createElement("span");
-    const question = document.createElement("span");
-    const metadata = document.createElement("span");
-
-    card.className = entry.chartAvailable ? "gallery-card" : "gallery-card is-unavailable";
-    if (entry.chartAvailable) {
-      const image = document.createElement("img");
-      card.href = entry.chartUrl;
-      card.target = "_blank";
-      card.rel = "noopener";
-      image.src = entry.chartUrl;
-      image.alt = chartAlt(entry.chartType, entry.question);
-      card.append(image);
-    } else {
-      const placeholder = document.createElement("span");
-      placeholder.className = "gallery-card-missing";
-      placeholder.textContent = "Chart unavailable";
-      card.append(placeholder);
-    }
-    content.className = "gallery-card-content";
-    question.className = "gallery-card-question";
-    question.textContent = entry.question;
-    metadata.className = "gallery-card-meta";
-    metadata.textContent = `${formatTimestamp(entry.timestamp)}${entry.chartType === null ? "" : ` · ${entry.chartType} chart`}`;
-    content.append(question, metadata);
-    card.append(content);
-    return card;
-  }
-
-  function clearSession() {
-    if (isSubmitting) {
-      return;
-    }
-    // Display state only. Saved history stays on the backend until it is
-    // explicitly deleted through "Clear saved history".
-    removeStoredValue(STORAGE_KEYS.view);
-    clearCurrentResult();
-    resetChart();
-    ui.questionInput.value = "";
-    setQuestionMessage("The displayed result was cleared. Saved history was kept.", "success");
-    activateView("ask", false);
-    announce("The displayed result was cleared. Saved history was kept.");
-  }
-
-  async function clearSavedHistory() {
-    if (isSubmitting) {
-      return;
-    }
-    const confirmed = window.confirm(
-      "Delete all saved query history? This cannot be undone. Charts, data, and logs are not affected.",
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    try {
-      const response = await fetch("/api/history", {
-        method: "DELETE",
-        headers: { Accept: "application/json" },
-      });
-      const payload = await readJson(response);
-      if (!response.ok || !isRecord(payload) || payload.ok !== true) {
-        throw new Error("History could not be cleared");
-      }
-      savedHistory = [];
-      renderHistory(savedHistory);
-      renderChartGallery();
-      setQuestionMessage("Saved history was deleted.", "success");
-      announce("Saved history was deleted.");
-    } catch (_error) {
-      setQuestionMessage("Saved history could not be deleted. Please try again.", "error");
-      announce("Saved history could not be deleted.");
-    }
-  }
-
-  function clearCurrentResult() {
-    ui.resultsCard.hidden = true;
-    ui.askedQuestion.textContent = "";
-    ui.askedBlock.hidden = true;
-    ui.answerText.textContent = "";
-    ui.answerWarning.textContent = "";
-    ui.answerWarning.hidden = true;
-    ui.rowMeta.textContent = "";
-    ui.truncationNote.textContent = "";
-    ui.truncationNote.hidden = true;
-    ui.emptyResult.hidden = true;
-    ui.resultTableHead.replaceChildren();
-    ui.resultTableBody.replaceChildren();
-    ui.tableWrap.hidden = false;
-    ui.resultTableCaption.textContent = "Query result rows";
-  }
-
   function setSubmitting(submitting) {
     isSubmitting = submitting;
     ui.askButton.disabled = submitting;
     ui.askButton.classList.toggle("is-loading", submitting);
     ui.questionInput.disabled = submitting;
-    ui.chartRequested.disabled = submitting;
-    ui.chartType.disabled = submitting || !ui.chartRequested.checked;
-    for (const button of ui.exampleButtons) {
-      button.disabled = submitting;
-    }
-    for (const button of ui.clearButtons) {
-      button.disabled = submitting;
-    }
+    ui.conversationStream.setAttribute("aria-busy", String(submitting));
+    syncConversationControls();
   }
 
-  function updateChartControls() {
-    ui.chartType.disabled = isSubmitting || !ui.chartRequested.checked;
+  function setConversationActionBusy(busy) {
+    isConversationAction = busy;
+    syncConversationControls();
   }
 
-  function selectedChartType() {
-    return CHART_TYPES.has(ui.chartType.value) ? ui.chartType.value : "auto";
+  function syncConversationControls() {
+    const disabled = isSubmitting || isConversationAction;
+    for (const button of ui.newChatButtons) {
+      button.disabled = disabled;
+    }
+    ui.deleteAllButton.disabled = disabled;
+    for (const button of document.querySelectorAll("[data-delete-conversation]")) {
+      button.disabled = disabled;
+    }
   }
 
   function toggleTheme() {
-    const nextTheme = document.documentElement.dataset.theme === "light" ? "dark" : "light";
-    applyTheme(nextTheme);
-    writeStoredValue(STORAGE_KEYS.theme, nextTheme);
+    applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light");
   }
 
   function applyTheme(theme) {
@@ -619,32 +1226,34 @@
     ui.themeIcon.textContent = lightThemeActive ? "◐" : "☼";
     ui.themeLabel.textContent = lightThemeActive ? "Dark theme" : "Light theme";
     ui.themeToggle.setAttribute("aria-label", lightThemeActive ? "Use dark theme" : "Use light theme");
+    writeStoredValue(STORAGE_KEYS.theme, selectedTheme);
   }
 
   function activateView(requestedView, shouldFocus) {
-    const viewName = VIEWS.has(requestedView) ? requestedView : "ask";
-    for (const view of ui.views) {
-      const active = view.dataset.view === viewName;
-      view.hidden = !active;
-      view.classList.toggle("is-active", active);
-      view.setAttribute("aria-hidden", String(!active));
-      if (active && shouldFocus) {
-        view.focus({ preventScroll: true });
-      }
+    const view = requestedView === "ask" ? "chat" : requestedView;
+    const activeView = VIEWS.has(view) ? view : "chat";
+    for (const section of ui.views) {
+      const isActive = section.dataset.view === activeView;
+      section.hidden = !isActive;
+      section.classList.toggle("is-active", isActive);
     }
-
     for (const button of ui.navButtons) {
-      const active = button.dataset.viewTarget === viewName;
-      button.classList.toggle("is-active", active);
-      if (active) {
+      const isActive = button.dataset.viewTarget === activeView;
+      button.classList.toggle("is-active", isActive);
+      if (isActive) {
         button.setAttribute("aria-current", "page");
       } else {
         button.removeAttribute("aria-current");
       }
     }
-
-    writeStoredValue(STORAGE_KEYS.view, viewName);
+    writeStoredValue(STORAGE_KEYS.view, activeView);
     closeNavigation();
+    if (shouldFocus) {
+      const target = document.getElementById(`view-${activeView}`);
+      if (target) {
+        target.focus();
+      }
+    }
   }
 
   function toggleNavigation() {
@@ -672,97 +1281,6 @@
     }
   }
 
-  function renderStatus(payload) {
-    const source = isRecord(payload.status) ? payload.status : payload;
-    const database = pickStatusValue(source, ["database", "database_status"]);
-    const api = pickStatusValue(source, ["api", "api_status"]);
-    const state = determineStatusState(database, api);
-    if (state === "error") {
-      renderUnavailableStatus();
-      return;
-    }
-
-    const statusEntries = [
-      ["Database", database],
-      ["Table", pickStatusValue(source, ["table", "table_name"])],
-      ["Analytics engine", pickStatusValue(source, ["analytics_engine", "engine"])],
-      ["Model", pickStatusValue(source, ["model", "model_name"])],
-      ["Web mode", pickStatusValue(source, ["web_mode", "mode"])],
-      ["API", api],
-    ].filter(function (entry) {
-      return entry[1] !== null;
-    });
-
-    ui.statusList.replaceChildren();
-    for (const [label, value] of statusEntries) {
-      const row = document.createElement("div");
-      const term = document.createElement("dt");
-      const detail = document.createElement("dd");
-      row.className = "status-row";
-      term.textContent = label;
-      detail.textContent = value;
-      row.append(term, detail);
-      ui.statusList.append(row);
-    }
-    setStatusDotState(state);
-  }
-
-  function renderUnavailableStatus() {
-    const row = document.createElement("div");
-    const term = document.createElement("dt");
-    const detail = document.createElement("dd");
-    row.className = "status-row";
-    term.textContent = "Service";
-    detail.textContent = "Unavailable";
-    row.append(term, detail);
-    ui.statusList.replaceChildren(row);
-    setStatusDotState("error");
-  }
-
-  function determineStatusState(database, api) {
-    const validDatabase = database === "Ready" || database === "Not initialized";
-    const validApi = api === "Configured" || api === "Missing";
-    if (!validDatabase || !validApi) {
-      return "error";
-    }
-    if (database === "Ready" && api === "Configured") {
-      return "ready";
-    }
-    return "warning";
-  }
-
-  function setStatusDotState(state) {
-    ui.statusDot.classList.remove("is-ready", "is-warning", "is-error");
-    ui.statusDot.classList.add(`is-${state}`);
-  }
-
-  function pickStatusValue(source, keys) {
-    for (const key of keys) {
-      const value = safeStatusValue(source[key]);
-      if (value !== null) {
-        return value;
-      }
-    }
-    return null;
-  }
-
-  function safeStatusValue(value) {
-    if (typeof value === "boolean") {
-      return value ? "Yes" : "No";
-    }
-    if (typeof value === "number" && Number.isFinite(value)) {
-      return String(value);
-    }
-    if (typeof value !== "string") {
-      return null;
-    }
-    const trimmed = value.trim();
-    if (trimmed.length === 0 || trimmed.length > 100 || /[\\/]/.test(trimmed) || trimmed.includes("..")) {
-      return null;
-    }
-    return trimmed;
-  }
-
   function setQuestionMessage(message, tone) {
     ui.questionMessage.textContent = message;
     ui.questionMessage.classList.toggle("is-error", tone === "error");
@@ -783,7 +1301,33 @@
         return message;
       }
     }
-    return "The analysis could not be completed. Please review your question and try again.";
+    return "The request could not be completed. Please review it and try again.";
+  }
+
+  function conversationGroupLabel(value) {
+    if (value === null) {
+      return "Older";
+    }
+    const timestamp = new Date(value);
+    if (Number.isNaN(timestamp.getTime())) {
+      return "Older";
+    }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (timestamp >= today) {
+      return "Today";
+    }
+    if (timestamp >= yesterday) {
+      return "Yesterday";
+    }
+    const previousSevenDays = new Date(today);
+    previousSevenDays.setDate(previousSevenDays.getDate() - 7);
+    if (timestamp >= previousSevenDays) {
+      return "Previous 7 Days";
+    }
+    return "Older";
   }
 
   function readStoredTheme() {
@@ -793,15 +1337,49 @@
 
   function readStoredView() {
     const savedView = readStoredValue(STORAGE_KEYS.view);
-    return VIEWS.has(savedView) ? savedView : "ask";
+    if (savedView === "ask") {
+      return "chat";
+    }
+    return VIEWS.has(savedView) ? savedView : "chat";
+  }
+
+  function safeConversationId(value) {
+    if (typeof value !== "string") {
+      return null;
+    }
+    const candidate = value.trim();
+    return CONVERSATION_ID_PATTERN.test(candidate) ? candidate : null;
+  }
+
+  function safeTitle(value) {
+    if (typeof value !== "string") {
+      return "Untitled chat";
+    }
+    const title = value.trim().slice(0, MAX_TITLE_CHARS);
+    return title.length === 0 ? "Untitled chat" : title;
+  }
+
+  function safeMessageContent(value, fallback) {
+    if (typeof value !== "string") {
+      return fallback;
+    }
+    const content = value.slice(0, MAX_MESSAGE_CHARS);
+    return content.trim().length === 0 ? fallback : content;
+  }
+
+  function safeOptionalText(value, maxLength) {
+    if (typeof value !== "string") {
+      return "";
+    }
+    return value.trim().slice(0, maxLength);
   }
 
   function safeTimestamp(value) {
     if (typeof value !== "string") {
-      return new Date().toISOString();
+      return null;
     }
-    const parsed = new Date(value);
-    return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+    const timestamp = new Date(value);
+    return Number.isNaN(timestamp.getTime()) ? null : timestamp.toISOString();
   }
 
   function readStoredValue(key) {
@@ -824,7 +1402,7 @@
     try {
       window.localStorage.removeItem(key);
     } catch (_error) {
-      // The displayed session state has already been cleared in memory.
+      // The displayed UI remains usable when browser storage is unavailable.
     }
   }
 
@@ -851,7 +1429,7 @@
   function chartAlt(chartType, question) {
     const conciseQuestion = typeof question === "string" && question.trim().length > 0
       ? question.trim().slice(0, 180)
-      : "the submitted question";
+      : "the saved question";
     return chartType === null
       ? `Generated chart for: ${conciseQuestion}`
       : `Generated ${chartType} chart for: ${conciseQuestion}`;
@@ -872,6 +1450,9 @@
   }
 
   function formatTimestamp(value) {
+    if (value === null) {
+      return "Recent";
+    }
     const timestamp = new Date(value);
     return Number.isNaN(timestamp.getTime()) ? "Recent" : timestamp.toLocaleString();
   }

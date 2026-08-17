@@ -18,6 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import database  # noqa: E402  (import after sys.path setup)
+import chart  # noqa: E402
 import history_repository  # noqa: E402
 import llm  # noqa: E402
 
@@ -54,6 +55,14 @@ def isolated_history_database(tmp_path, monkeypatch):
     """
     monkeypatch.setattr(history_repository, "HISTORY_DATABASE", tmp_path / "history.duckdb")
     return tmp_path / "history.duckdb"
+
+
+@pytest.fixture(autouse=True)
+def isolated_chart_directory(tmp_path, monkeypatch):
+    """Keep automatic chart rendering out of the real project chart gallery."""
+    target = tmp_path / "charts"
+    monkeypatch.setattr(chart, "CHARTS_DIR", target)
+    return target
 
 
 @pytest.fixture(scope="session")

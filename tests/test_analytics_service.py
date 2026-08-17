@@ -13,8 +13,9 @@ import pytest
 
 import analytics_service
 import app
-from chart import ChartError, ChartType, is_chart_request, requested_chart_type
+from chart import ChartDecision, ChartError, ChartType, is_chart_request, requested_chart_type
 from database import QueryResult
+from intent import Intent, QueryPlan
 from llm import INVALID_QUESTION, NO_DATA_ANSWER
 
 
@@ -40,7 +41,7 @@ def make_result(
 
 
 class TestChartQuestionAdapter:
-    """The UI adapter adds presentation intent without choosing chart behavior."""
+    """Legacy API clients can still add presentation intent safely."""
 
     def test_plain_question_is_normalized_but_not_given_a_chart(self):
         assert (
@@ -181,7 +182,7 @@ class TestProcessQuestion:
         assert response.answer_fallback_used is False
 
     def test_plain_question_never_creates_a_chart(self):
-        result = make_result()
+        result = make_result(pd.DataFrame({"win_rate": [0.42]}))
         chart_calls = 0
 
         def forbidden_chart(*_args, **_kwargs):
@@ -190,7 +191,7 @@ class TestProcessQuestion:
             raise AssertionError("A plain question must not create a chart")
 
         response = analytics_service.process_question(
-            "How many opportunities are there by region?",
+            "What is the overall win rate?",
             sql_generator=lambda _question: "SELECT 1;",
             query_runner=lambda _sql: result,
             answer_generator=lambda _question, _result: "There are opportunities in two regions.",
@@ -202,6 +203,91 @@ class TestProcessQuestion:
         assert response.result is result
         assert response.chart_requested is False
         assert response.chart_path is None
+        assert response.chart_decision is ChartDecision.NO_CHART
+
+    def test_categorical_comparison_automatically_uses_same_result_for_chart(self):
+        result = make_result()
+        query_calls = 0
+        chart_results: list[QueryResult] = []
+
+        def run_query(_sql: str) -> QueryResult:
+            nonlocal query_calls
+            query_calls += 1
+            return result
+
+        def create_chart(_question: str, supplied_result: QueryResult):
+            chart_results.append(supplied_result)
+            return Path("automatic-bar.png"), ChartType.BAR, None
+
+        response = analytics_service.process_question(
+            "Compare opportunities across regions.",
+            sql_generator=lambda _question: "SELECT 1;",
+            query_runner=run_query,
+            answer_generator=lambda _question, supplied_result: (
+                "NA leads." if supplied_result is result else pytest.fail("wrong result")
+            ),
+            chart_creator=create_chart,
+            query_logger=lambda _sql, _result: None,
+        )
+
+        assert query_calls == 1
+        assert chart_results == [result]
+        assert response.chart_decision is ChartDecision.AUTO_USEFUL
+        assert response.chart_requested is True
+        assert response.chart_type is ChartType.BAR
+
+    def test_explicit_scalar_request_returns_explanation_without_chart_call(self):
+        result = make_result(pd.DataFrame({"win_rate": [0.42]}))
+
+        response = analytics_service.process_question(
+            "What is the win rate? Show me a chart.",
+            sql_generator=lambda _question: "SELECT 1;",
+            query_runner=lambda _sql: result,
+            answer_generator=lambda _question, _result: "The win rate is 42%.",
+            chart_creator=lambda *_args: pytest.fail("a scalar must not be charted"),
+            query_logger=lambda _sql, _result: None,
+        )
+
+        assert response.chart_decision is ChartDecision.USER_REQUESTED
+        assert response.chart_requested is True
+        assert response.chart_path is None
+        assert response.chart_note and "single value" in response.chart_note
+
+    def test_follow_up_chart_request_uses_context_and_one_fresh_query(self):
+        result = make_result()
+        planner_calls: list[tuple[str, str | None]] = []
+        query_calls = 0
+
+        def plan(question: str, *, conversation_context: str | None = None) -> QueryPlan:
+            planner_calls.append((question, conversation_context))
+            return QueryPlan(intent=Intent.DATA_QUERY, sql="SELECT region, COUNT(*) FROM opportunities GROUP BY region;")
+
+        def query(_sql: str) -> QueryResult:
+            nonlocal query_calls
+            query_calls += 1
+            return result
+
+        response = analytics_service.process_question(
+            "Show me a chart.",
+            conversation_context="USER: Compare regional opportunity counts.",
+            plan_generator=plan,
+            query_runner=query,
+            answer_generator=lambda _question, supplied_result: (
+                "NA leads." if supplied_result is result else pytest.fail("wrong result")
+            ),
+            chart_creator=lambda _question, supplied_result: (
+                Path("follow-up.png"), ChartType.BAR, None
+            ) if supplied_result is result else pytest.fail("wrong result"),
+            query_logger=lambda *_args: None,
+        )
+
+        assert planner_calls == [
+            ("Show me a chart.", "USER: Compare regional opportunity counts.")
+        ]
+        assert query_calls == 1
+        assert response.result is result
+        assert response.chart_decision is ChartDecision.USER_REQUESTED
+        assert response.chart_path == Path("follow-up.png")
 
     @pytest.mark.parametrize("blank", ["", "   ", "\ufeff", "\u200b\u00a0"])
     def test_blank_or_invisible_question_makes_no_generation_call(self, blank):
@@ -226,11 +312,44 @@ class TestProcessQuestion:
 
         assert response.refused is True
         assert response.result is None
+        assert response.chart_requested is False
+        assert response.chart_decision is ChartDecision.NO_CHART
         # The reply is now a category-specific friendly template rather than one
         # fixed sentence. "capital of France" is an out-of-scope question.
         import refusal
 
         assert response.answer in refusal._TEMPLATES[refusal.RefusalCategory.OUT_OF_SCOPE]
+
+    def test_conceptual_question_never_creates_a_chart(self):
+        response = analytics_service.process_question(
+            "Visualize what pipeline means.",
+            plan_generator=lambda _question: QueryPlan(
+                intent=Intent.DATA_EXPLANATION, sql=None
+            ),
+            conceptual_answer_generator=lambda _question: "Pipeline is the value of active opportunities.",
+            query_runner=lambda _sql: pytest.fail("conceptual questions execute no query"),
+            chart_creator=lambda *_args: pytest.fail("conceptual questions create no chart"),
+            query_logger=lambda *_args: None,
+        )
+
+        assert response.refused is False
+        assert response.result is None
+        assert response.chart_requested is False
+        assert response.chart_decision is ChartDecision.NO_CHART
+
+    def test_refusal_with_chart_wording_never_creates_a_chart(self):
+        response = analytics_service.process_question(
+            "Show the database schema as a chart.",
+            plan_generator=lambda _question: pytest.fail("structure refusal is local"),
+            query_runner=lambda _sql: pytest.fail("refusals execute no query"),
+            chart_creator=lambda *_args: pytest.fail("refusals create no chart"),
+            query_logger=lambda *_args: None,
+        )
+
+        assert response.refused is True
+        assert response.result is None
+        assert response.chart_requested is False
+        assert response.chart_decision is ChartDecision.NO_CHART
 
     def test_empty_result_uses_local_no_data_answer_without_answer_generation(self):
         result = make_result(pd.DataFrame(columns=["region", "deals"]))

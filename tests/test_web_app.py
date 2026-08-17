@@ -138,7 +138,8 @@ class TestApplicationShell:
         javascript = client.get("/static/js/app.js")
 
         assert index.status_code == 200
-        assert b"Mini Local Analytics" in index.data
+        assert b"Analytics Assistant" in index.data
+        assert b"Mini Local Analytics Assistant" not in index.data
         assert css.status_code == 200
         assert b"--" in css.data
         assert javascript.status_code == 200
@@ -163,6 +164,20 @@ class TestApplicationShell:
         assert str(tmp_path) not in rendered
         assert "GROQ_API_KEY" not in rendered
         assert "schema" not in rendered.lower()
+
+    def test_primary_ui_has_no_status_card_or_manual_chart_controls(self, app_factory):
+        application = app_factory(lambda *_args, **_kwargs: make_response())
+        source = application.test_client().get("/").get_data(as_text=True)
+
+        assert "System Ready" not in source
+        assert "System status" not in source
+        assert 'id="status-dot"' not in source
+        assert 'id="system-status-list"' not in source
+        assert 'id="chart-requested"' not in source
+        assert 'id="chart-type"' not in source
+        assert "Generate chart" not in source
+        assert "Preferred chart" not in source
+        assert "What can I help you analyze?" in source
 
     def test_security_headers_are_attached_to_html_and_json(self, app_factory):
         application = app_factory(lambda *_args, **_kwargs: make_response())
@@ -465,7 +480,7 @@ class TestClientSourceSafety:
         assert "eval(" not in source
         assert "new Function" not in source
 
-    def test_client_submits_only_the_current_question_and_chart_preferences(self, app_factory):
+    def test_client_submits_only_the_current_question_and_chat_id(self, app_factory):
         application = app_factory(lambda *_args, **_kwargs: make_response())
         source = application.test_client().get("/static/js/app.js").get_data(as_text=True)
         request_start = source.index("const requestBody")
@@ -474,9 +489,11 @@ class TestClientSourceSafety:
 
         assert source.count('fetch("/api/query"') == 1
         assert "history" not in request_body_source
+        assert "messages" not in request_body_source
         assert "question" in request_body_source
-        assert "chart_requested" in request_body_source
-        assert "chart_type" in request_body_source
+        assert "chart_requested" not in request_body_source
+        assert "chart_type" not in request_body_source
+        assert "conversation_id" in request_body_source
 
     def test_client_has_accurate_truncation_copy_and_no_generated_sql_interface(
         self, app_factory
@@ -487,69 +504,74 @@ class TestClientSourceSafety:
         assert "Additional rows were not fetched" in source
         assert "generated SQL" not in source
         assert "QueryResult.sql" not in source
+        assert "ui.conversationStream" in source
+        assert "data-toggle" in source
+        assert 'button.setAttribute("aria-expanded", "false")' in source
+        assert "message-data-unavailable" in source
+        assert "textContent" in source
 
-    def test_client_status_logic_distinguishes_ready_warning_and_error(self, app_factory):
+    def test_client_has_no_permanent_status_diagnostics(self, app_factory):
         application = app_factory(lambda *_args, **_kwargs: make_response())
         client = application.test_client()
         source = client.get("/static/js/app.js").get_data(as_text=True)
         css_source = client.get("/static/css/app.css").get_data(as_text=True)
 
-        state_start = source.index("function determineStatusState")
-        state_end = source.index("function setStatusDotState", state_start)
-        state_helper = source[state_start:state_end]
-        dot_start = state_end
-        dot_end = source.index("function pickStatusValue", dot_start)
-        dot_helper = source[dot_start:dot_end]
-        load_start = source.index("async function loadStatus")
-        load_end = source.index("async function readJson", load_start)
-        load_status = source[load_start:load_end]
-        unavailable_start = source.index("function renderUnavailableStatus")
-        unavailable_end = state_start
-        unavailable_status = source[unavailable_start:unavailable_end]
+        assert 'fetch("/api/status"' not in source
+        assert "loadStatus" not in source
+        assert "determineStatusState" not in source
+        assert ".status-card" not in css_source
+        assert ".status-dot" not in css_source
 
-        # Only a ready database plus configured API is healthy. Recognized
-        # dependency failures are warnings; invalid status values are errors.
-        assert 'const validDatabase = database === "Ready" || database === "Not initialized";' in state_helper
-        assert 'const validApi = api === "Configured" || api === "Missing";' in state_helper
-        assert "if (!validDatabase || !validApi)" in state_helper
-        assert 'database === "Ready" && api === "Configured"' in state_helper
-        assert '"Not initialized"' in state_helper
-        assert '"Missing"' in state_helper
-        assert 'return "ready";' in state_helper
-        assert 'return "warning";' in state_helper
-        assert 'return "error";' in state_helper
-        assert "renderUnavailableStatus();" in load_status
-        assert 'setStatusDotState("error");' in unavailable_status
+    def test_charts_render_inside_current_and_historical_assistant_messages(self, app_factory):
+        application = app_factory(lambda *_args, **_kwargs: make_response())
+        source = application.test_client().get("/static/js/app.js").get_data(as_text=True)
 
-        # Every update removes stale status state before adding the new one.
-        assert 'classList.remove("is-ready", "is-warning", "is-error")' in dot_helper
-        assert "classList.add(`is-${state}`)" in dot_helper
-        assert ".status-dot.is-ready" in css_source
-        assert ".status-dot.is-warning" in css_source
-        assert ".status-dot.is-error" in css_source
+        assert "appendChartBlock(article, message.chart" in source
+        assert 'section.className = "message-chart"' in source
+        assert "article.append(section)" in source
+        assert "historical: false" in source
+        assert "historical: true" in source
+        assert "This saved chart is unavailable because its PNG file is no longer on disk." in source
+        assert "safeChartUrl" in source
 
-    def test_history_and_chart_labels_match_their_storage_lifetimes(self, app_factory):
-        """Copy must describe persistent storage, not the old browser-local one."""
+    def test_internal_chart_policy_is_not_exposed_to_the_browser(self, app_factory):
         application = app_factory(lambda *_args, **_kwargs: make_response())
         client = application.test_client()
         index_source = client.get("/").get_data(as_text=True)
         javascript_source = client.get("/static/js/app.js").get_data(as_text=True)
 
-        assert "SAVED LOCALLY" in index_source
-        assert "Saved on this machine and kept until you delete it." in index_source
-        assert "Charts from your saved history, kept until you delete it." in index_source
+        for internal_label in ("AUTO_USEFUL", "USER_REQUESTED", "NO_CHART"):
+            assert internal_label not in index_source
+            assert internal_label not in javascript_source
+
+    def test_conversation_and_chart_labels_match_their_storage_lifetimes(self, app_factory):
+        """Copy must describe persistent chats, not the superseded one-card UI."""
+        application = app_factory(lambda *_args, **_kwargs: make_response())
+        client = application.test_client()
+        index_source = client.get("/").get_data(as_text=True)
+        javascript_source = client.get("/static/js/app.js").get_data(as_text=True)
+
+        # Save-state labels were removed from the chat surface: persistence is
+        # what the app always does, not news to report on every turn. The claim
+        # itself still has to be findable, and About is now the one place that
+        # makes it - which is also the only place a user goes looking for it.
+        assert 'id="conversation-list"' in index_source
+        assert "Chats are stored on this machine" in index_source
+        assert "Past result rows are not retained" in index_source
+        assert "Saved chart files can also become unavailable" in index_source
         # The superseded browser-only wording must not survive anywhere.
         assert "BROWSER-LOCAL" not in index_source
         assert "CURRENT SESSION" not in index_source
         assert "stored in this browser" not in index_source
         assert "this browser session" not in index_source
 
-        # History is fetched from the backend; localStorage keeps preferences only.
-        assert "/api/history" in javascript_source
+        # Conversations are fetched from the backend; localStorage keeps preferences only.
+        assert "/api/conversations" in javascript_source
+        assert "/api/history" not in javascript_source
         assert "sessionCharts" not in javascript_source
         assert "STORAGE_KEYS.history" not in javascript_source
 
-    def test_client_treats_backend_history_as_authoritative(self, app_factory):
+    def test_client_treats_backend_conversations_as_authoritative(self, app_factory):
         application = app_factory(lambda *_args, **_kwargs: make_response())
         javascript_source = application.test_client().get("/static/js/app.js").get_data(as_text=True)
 
@@ -560,18 +582,23 @@ class TestClientSourceSafety:
         assert "theme: \"mini-local-analytics.theme\"" in javascript_source
         assert "view: \"mini-local-analytics.view\"" in javascript_source
         assert "history: \"mini-local-analytics.history\"" not in javascript_source
+        assert "loadConversations" in javascript_source
+        assert "loadConversation" in javascript_source
+        assert "initialConversationLoadPending" in javascript_source
+        assert "loadConversation(conversations[0].id, true)" in javascript_source
+        assert "value.conversation_id" in javascript_source
+        assert "messages_truncated" in javascript_source
 
-    def test_clear_saved_history_is_confirmed_and_separate_from_clear_session(self, app_factory):
+    def test_delete_saved_conversations_is_confirmed_and_keeps_charts_out_of_scope(self, app_factory):
         application = app_factory(lambda *_args, **_kwargs: make_response())
         client = application.test_client()
         index_source = client.get("/").get_data(as_text=True)
         javascript_source = client.get("/static/js/app.js").get_data(as_text=True)
 
-        assert "data-clear-history" in index_source
-        assert "Clear saved history" in index_source
+        assert "data-delete-all-conversations" in index_source
+        assert "Delete all chats" in index_source
         assert "window.confirm(" in javascript_source
         assert 'method: "DELETE"' in javascript_source
-        # Clear session must remain display-only.
-        clear_session = javascript_source.split("function clearSession()")[1].split("async function")[0]
-        assert "DELETE" not in clear_session
-        assert "/api/history" not in clear_session
+        delete_all = javascript_source.split("async function deleteAllConversations()")[1].split("function renderNewConversation")[0]
+        assert 'fetch("/api/conversations"' in delete_all
+        assert "Charts, data, and logs are not affected." in delete_all

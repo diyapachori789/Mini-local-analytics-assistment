@@ -48,9 +48,21 @@ RESTRICT_FILE_ACCESS = True
 
 # --- LLM -------------------------------------------------------------------
 
+# The single source of truth for which model every stage uses: routing, SQL
+# generation, conversation, and grounded answers all read MODEL_NAME.
+#
 # Override with GROQ_MODEL in .env or the environment to switch models without
 # touching code, for example when a model's daily token quota is exhausted.
-MODEL_NAME = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+#
+# 2026-08-17: moved to openai/gpt-oss-120b. Groq retired both llama-3.1-8b-instant
+# (what this defaulted to) and llama-3.3-70b-versatile, so every request failed
+# with "model not found". gpt-oss-120b was chosen over the other suggested
+# replacement, qwen/qwen3.6-27b, because Qwen writes its chain of thought into
+# message.content: the routing JSON arrives wrapped in <think> blocks and the
+# reply is truncated at the token ceiling before the answer begins. Reading it
+# would mean loosening the plan parser, which is the one place that must stay
+# strict. gpt-oss returns reasoning in a separate field, leaving content clean.
+MODEL_NAME = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 LLM_TEMPERATURE = 0
 # Without an explicit timeout a hung request blocks the CLI indefinitely.
 LLM_TIMEOUT_SECONDS = 30.0
@@ -108,6 +120,24 @@ HISTORY_DEFAULT_LIMIT = 50
 
 # Server-side ceiling. A browser cannot request an unbounded history page.
 HISTORY_MAX_LIMIT = 100
+
+# --- Persistent conversations ---------------------------------------------
+
+# Conversations are intentionally stored beside the existing safe history
+# records, in ``history.duckdb``.  They provide semantic orientation for a
+# follow-up, not a second data source: the planner still has to retrieve every
+# current figure from DuckDB.
+#
+# Keep this window deliberately small.  It is applied before the first model
+# call and excludes result rows, SQL, schema text, paths, logs, and provider
+# payloads.  The limits are duplicated defensively in the repository so a
+# malformed caller cannot turn history into an unbounded prompt.
+CONVERSATION_CONTEXT_MAX_MESSAGES = 6
+CONVERSATION_CONTEXT_MAX_CHARS = 2_400
+CONVERSATION_CONTEXT_MAX_MESSAGE_CHARS = 600
+CONVERSATION_TITLE_MAX_CHARS = 64
+CONVERSATION_DEFAULT_LIMIT = 100
+CONVERSATION_MESSAGE_LIMIT = 200
 
 # --- Web server ------------------------------------------------------------
 

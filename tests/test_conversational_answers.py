@@ -11,7 +11,6 @@ import pandas as pd
 import pytest
 
 import analytics_service
-import history_repository
 import llm
 import web_app
 from database import QueryResult
@@ -206,14 +205,22 @@ class TestApiExposesTheQuestion:
         assert client.post("/api/query", json={"question": "x" * 2001}).status_code == 400
         assert client.post("/api/query", json={"question": "x" * 2000}).status_code == 200
 
-    def test_conversational_answer_is_persisted_in_history(self, client):
-        client.post("/api/query", json={"question": "can i change the win rate?"})
-        record = history_repository.list_history()[0]
-        assert "calculated from opportunity outcomes" in record.answer
-        assert record.original_question == "can i change the win rate?"
+    def test_conversational_answer_is_persisted_in_its_conversation(self, client):
+        response = client.post("/api/query", json={"question": "can i change the win rate?"})
+        payload = response.get_json()
+
+        assert response.status_code == 200
+        assert payload["conversation_saved"] is True
+        detail = client.get(f"/api/conversations/{payload['conversation_id']}").get_json()
+        messages = detail["conversation"]["messages"]
+        assert [message["role"] for message in messages] == ["user", "assistant"]
+        assert messages[0]["content"] == "can i change the win rate?"
+        assert "calculated from opportunity outcomes" in messages[1]["content"]
+        assert "rows" not in messages[1]
+        assert "columns" not in messages[1]
 
 
-class TestResultBoxMarkup:
+class TestConversationStreamMarkup:
     @pytest.fixture
     def client(self, monkeypatch, tmp_path):
         monkeypatch.setattr(web_app, "CHARTS_DIR", tmp_path, raising=False)
@@ -221,25 +228,108 @@ class TestResultBoxMarkup:
         application.config.update(TESTING=True, CHARTS_DIR=tmp_path)
         return application.test_client()
 
-    def test_page_has_a_you_asked_block(self, client):
+    def test_page_has_a_saved_conversation_stream(self, client):
         page = client.get("/").get_data(as_text=True)
-        assert 'id="asked-block"' in page
-        assert 'id="asked-question"' in page
-        assert "You asked" in page
+        assert 'id="conversation-heading"' in page
+        assert 'id="conversation-stream"' in page
+        assert 'id="conversation-list"' in page
+        assert 'role="log"' in page
 
-    def test_question_and_answer_are_set_as_text(self, client):
+    def test_conversation_text_is_set_safely(self, client):
         source = client.get("/static/js/app.js").get_data(as_text=True)
-        assert "ui.askedQuestion.textContent" in source
-        assert "ui.answerText.textContent" in source
+        assert "body.textContent = content" in source
+        assert "title.textContent = entry.title" in source
         assert "innerHTML" not in source
 
-    def test_question_block_hides_when_empty_and_on_clear(self, client):
+    def test_current_rows_are_rendered_behind_an_accessible_data_toggle(self, client):
         source = client.get("/static/js/app.js").get_data(as_text=True)
-        assert "ui.askedBlock.hidden = askedText.length === 0" in source
-        cleared = source.split("function clearCurrentResult()")[1].split("function")[0]
-        assert "ui.askedBlock.hidden = true" in cleared
+        assert "function createDataToggle(message)" in source
+        assert 'button.className = "data-toggle"' in source
+        assert 'button.setAttribute("aria-expanded", "false")' in source
+        assert "article.append(createDataToggle(message))" in source
 
-    def test_table_still_rendered_below_the_answer(self, client):
+    def test_saved_messages_explain_that_result_rows_are_not_retained(self, client):
         page = client.get("/").get_data(as_text=True)
-        assert page.index('id="asked-block"') < page.index('id="answer-text"')
-        assert page.index('id="answer-text"') < page.index('id="result-table"')
+        source = client.get("/static/js/app.js").get_data(as_text=True)
+        assert page.index('id="conversation-heading"') < page.index('id="conversation-stream"')
+        assert "The returned data rows were not retained for this saved chat." in source
+        assert "rows were returned for this saved message" in source
+        assert "messagesTruncated" in source
+        assert "message.historical" in source
+
+
+class TestModelMigration:
+    """Groq retired the Llama 3.x models this project used (2026-08-17).
+
+    These pin the decisions made during that migration, not the prose of any
+    model, so they stay meaningful when the model changes again.
+    """
+
+    RETIRED = ("llama-3.3-70b-versatile", "llama-3.1-8b-instant")
+
+    def test_the_configured_model_is_not_a_retired_one(self):
+        import config
+
+        assert config.MODEL_NAME not in self.RETIRED
+
+    def test_every_stage_reads_one_model_setting(self):
+        """Routing, SQL, conversation and answers must not drift apart."""
+        source = (llm.__file__ and open(llm.__file__, encoding="utf-8").read()) or ""
+        # The only model identifier in llm.py is the shared constant.
+        for retired in self.RETIRED:
+            assert retired not in source
+        assert source.count("model=MODEL_NAME") >= 2
+
+    def test_the_model_is_overridable_without_a_code_change(self, monkeypatch):
+        import importlib
+
+        import config
+
+        monkeypatch.setenv("GROQ_MODEL", "some/other-model")
+        reloaded = importlib.reload(config)
+        try:
+            assert reloaded.MODEL_NAME == "some/other-model"
+        finally:
+            monkeypatch.delenv("GROQ_MODEL", raising=False)
+            importlib.reload(config)
+
+    def test_answers_may_not_quote_a_column_name(self):
+        """gpt-oss-120b said 'the win_rate_pct column', leaking the schema."""
+        assert "Never quote a column name back to the reader" in SYSTEM
+        assert "win_rate_pct column" in SYSTEM  # shown as the counter-example
+
+    @pytest.mark.parametrize(
+        "status,text,expected",
+        [
+            (401, "Invalid API Key", "authentication"),
+            (404, "model_not_found", "not available"),
+            (429, "rate limit reached", "rate limit"),
+            (None, "Request timed out", "timed out"),
+            (500, "internal error", "provider request failed"),
+        ],
+    )
+    def test_provider_failures_are_classified_for_the_log(self, status, text, expected):
+        exc = RuntimeError(text)
+        if status is not None:
+            exc.status_code = status
+        assert expected in llm.describe_provider_failure(exc)
+
+    def test_the_classification_never_reaches_the_browser(self):
+        """The operator learns the cause from the log; the user does not."""
+        source = open("web_app.py", encoding="utf-8").read()
+        assert "describe_provider_failure" not in source
+        assert "The language model is unavailable. Please try again later." in source
+
+    def test_rates_are_not_read_out_as_raw_floats(self):
+        """gpt-oss-120b answered '23.666666666666668 percent'."""
+        assert "23.666666666666668 is" in SYSTEM
+        assert "Two decimal places is also the sensible upper bound" in SYSTEM
+
+    def test_the_answer_may_not_name_where_a_figure_came_from(self):
+        """gpt-oss-120b said 'the value returned by the query'."""
+        assert "names the machinery" in SYSTEM
+
+    def test_a_difference_between_shown_values_is_still_arithmetic(self):
+        """gpt-oss-120b volunteered 'a spread of about 3.6 percentage points'."""
+        assert "A difference between two shown values is still a new number" in SYSTEM
+        assert "3.6 percentage points" in SYSTEM

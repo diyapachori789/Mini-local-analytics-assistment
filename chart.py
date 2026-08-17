@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -52,10 +53,28 @@ class ChartType(str, Enum):
     SCATTER = "scatter"
 
 
+class ChartDecision(str, Enum):
+    """Internal reason a result should, or should not, be visualized."""
+
+    AUTO_USEFUL = "auto_useful"
+    USER_REQUESTED = "user_requested"
+    NO_CHART = "no_chart"
+
+
+@dataclass(frozen=True)
+class ChartRecommendation:
+    """A deterministic chart decision made without a model or database call."""
+
+    decision: ChartDecision
+    should_render: bool
+    chart_type: Optional[ChartType] = None
+    note: Optional[str] = None
+
+
 # --- Intent detection ------------------------------------------------------
 
-# Words that only appear when someone is asking to see a picture. Deliberately
-# narrow: a chart must be requested, never inferred from the shape of a result.
+# Words that only appear when someone is explicitly asking to see a picture.
+# Automatic usefulness is a separate, post-query decision below.
 _CHART_INTENT_RE = re.compile(
     r"""
     \b(
@@ -142,12 +161,29 @@ _RELATION_WORDS_RE = re.compile(
     re.IGNORECASE,
 )
 
+_COMPARISON_WORDS_RE = re.compile(
+    r"\b(compare|comparison|across|by|per|each|top|bottom|rank\w*|highest|"
+    r"lowest|most|least|breakdown|distribution|share|composition|split)\b",
+    re.IGNORECASE,
+)
+_GROUPED_SQL_RE = re.compile(r"\bgroup\s+by\b", re.IGNORECASE)
+_IDENTIFIER_COLUMN_RE = re.compile(r"(^id$|_id$|^identifier$)", re.IGNORECASE)
+
+# Rendering hundreds of unrelated categories is technically possible but not
+# useful. Time series and relationships tolerate more points than category
+# labels, while automatic category charts remain deliberately compact.
+_AUTO_MAX_CATEGORY_ROWS = 30
+_AUTO_MAX_SERIES_ROWS = 250
+_EXPLICIT_MAX_CATEGORY_ROWS = 100
+_EXPLICIT_MAX_SERIES_ROWS = 500
+_MAX_VISUAL_COLUMNS = 4
+
 
 def is_chart_request(question: str) -> bool:
     """True when the question explicitly asks for a chart.
 
-    Intent must be stated. A grouped or multi-row result is never on its own a
-    reason to draw something the user did not ask for.
+    This helper recognizes presentation wording only. Automatic usefulness is
+    handled separately by :func:`recommend_chart` after a result exists.
     """
     if not isinstance(question, str) or not question.strip():
         return False
@@ -212,7 +248,11 @@ def _temporal_columns(frame: pd.DataFrame) -> list[str]:
         series = frame[name]
         if pd.api.types.is_datetime64_any_dtype(series):
             temporal.append(name)
-        elif series.dtype == object and len(series) and _looks_like_dates(series):
+        elif (
+            (series.dtype == object or pd.api.types.is_string_dtype(series))
+            and len(series)
+            and _looks_like_dates(series)
+        ):
             temporal.append(name)
     return temporal
 
@@ -239,6 +279,129 @@ def _categorical_columns(frame: pd.DataFrame) -> list[str]:
     return [name for name in frame.columns if name not in numeric and name not in temporal]
 
 
+def _meaningful_numeric_columns(frame: pd.DataFrame) -> list[str]:
+    """Return numeric measures while excluding obvious technical identifiers."""
+    return [
+        name
+        for name in _numeric_columns(frame)
+        if not _IDENTIFIER_COLUMN_RE.search(str(name).strip())
+    ]
+
+
+def _unsuitable_note(result: QueryResult) -> str:
+    if result.is_empty:
+        return "A meaningful chart could not be created because the query returned no rows."
+    if len(result.frame) <= 1:
+        return (
+            "A meaningful chart could not be created because the returned data is a "
+            "single value or single record."
+        )
+    return "A meaningful chart could not be created from the returned data."
+
+
+def _explicit_shape_is_useful(result: QueryResult) -> bool:
+    """Whether an explicit request has enough coherent data to visualize."""
+    frame = result.frame
+    row_count = len(frame)
+    if result.is_empty or row_count <= 1 or len(frame.columns) > _MAX_VISUAL_COLUMNS:
+        return False
+
+    numeric = _meaningful_numeric_columns(frame)
+    temporal = _temporal_columns(frame)
+    categorical = _categorical_columns(frame)
+    if temporal and numeric:
+        return row_count <= _EXPLICIT_MAX_SERIES_ROWS
+    if len(numeric) >= 2:
+        return row_count <= _EXPLICIT_MAX_SERIES_ROWS
+    if categorical and numeric:
+        return row_count <= _EXPLICIT_MAX_CATEGORY_ROWS
+    return False
+
+
+def recommend_chart(question: str, result: QueryResult) -> ChartRecommendation:
+    """Decide locally whether this one authoritative result merits a chart.
+
+    Explicit presentation intent is respected when the result has a meaningful
+    visual structure. Without an explicit request, both the question/query
+    semantics and a compact result shape must support the visualization. This
+    function performs no I/O and never calls the model or DuckDB.
+    """
+    explicit = is_chart_request(question)
+    if not isinstance(result, QueryResult):
+        return ChartRecommendation(ChartDecision.NO_CHART, False)
+
+    frame = result.frame
+    row_count = len(frame)
+    if explicit:
+        if not _explicit_shape_is_useful(result):
+            return ChartRecommendation(
+                ChartDecision.USER_REQUESTED,
+                False,
+                note=_unsuitable_note(result),
+            )
+        chart_type, note = resolve_chart_type(question, result)
+        return ChartRecommendation(
+            ChartDecision.USER_REQUESTED,
+            True,
+            chart_type=chart_type,
+            note=note,
+        )
+
+    if (
+        result.is_empty
+        or row_count <= 1
+        or len(frame.columns) > _MAX_VISUAL_COLUMNS
+        or result.truncated
+    ):
+        return ChartRecommendation(ChartDecision.NO_CHART, False)
+
+    numeric = _meaningful_numeric_columns(frame)
+    temporal = _temporal_columns(frame)
+    categorical = _categorical_columns(frame)
+    question_text = question or ""
+    grouped_query = bool(_GROUPED_SQL_RE.search(result.sql or ""))
+
+    if temporal and numeric and row_count <= _AUTO_MAX_SERIES_ROWS:
+        return ChartRecommendation(
+            ChartDecision.AUTO_USEFUL, True, ChartType.LINE
+        )
+
+    if (
+        len(numeric) >= 2
+        and row_count <= _AUTO_MAX_SERIES_ROWS
+        and _RELATION_WORDS_RE.search(question_text)
+    ):
+        return ChartRecommendation(
+            ChartDecision.AUTO_USEFUL, True, ChartType.SCATTER
+        )
+
+    comparison_semantics = bool(_COMPARISON_WORDS_RE.search(question_text)) or grouped_query
+    if (
+        categorical
+        and numeric
+        and row_count <= _AUTO_MAX_CATEGORY_ROWS
+        and comparison_semantics
+    ):
+        return ChartRecommendation(
+            ChartDecision.AUTO_USEFUL,
+            True,
+            select_chart_type(question_text, result),
+        )
+
+    # A numeric ordered dimension can represent time even when the database
+    # returns it as an integer year/quarter rather than a date-typed column.
+    if (
+        len(numeric) >= 2
+        and row_count <= _AUTO_MAX_SERIES_ROWS
+        and _TIME_WORDS_RE.search(question_text)
+    ):
+        return ChartRecommendation(
+            ChartDecision.AUTO_USEFUL, True, ChartType.LINE
+        )
+
+    return ChartRecommendation(ChartDecision.NO_CHART, False)
+
+
 # --- Chart type selection --------------------------------------------------
 
 
@@ -262,6 +425,8 @@ def select_chart_type(question: str, result: QueryResult) -> ChartType:
         # Wording says trend and there is something to trend, but no real date
         # column; only treat it as a line if the first column is ordered-looking.
         if categorical and len(frame) > 2:
+            return ChartType.LINE
+        if len(numeric) >= 2:
             return ChartType.LINE
 
     # Relationship between two measured quantities.
